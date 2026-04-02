@@ -32,28 +32,6 @@ const LoginRoute = () => {
 
 const App = () => {
   
-  useEffect(() => {
-  console.log("🔥 useEffect動いた");
-
-  const testInsert = async () => {
-    console.log("🔥 insert開始");
-
-    const { data, error } = await supabase
-      .from('requests')
-      .insert([
-        {
-          item_id: 1,
-          user_id: '11111111-1111-1111-1111-111111111111',
-          request_quantity: 2
-        }
-      ])
-
-    console.log("🔥 data:", data)
-    console.log("🔥 error:", error)
-  }
-
-  testInsert()
-}, [])
 
   return (
     <QueryClientProvider client={queryClient}>
