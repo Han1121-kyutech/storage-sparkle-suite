@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { mockItems } from '@/data/mockData';
-import { Search, MapPin } from 'lucide-react';
+import { Search, ChevronDown, ChevronRight, MapPin, Package } from 'lucide-react';
 
 const ItemsPage = () => {
   const [search, setSearch] = useState('');
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
 
   const filtered = mockItems.filter(
     (item) =>
@@ -12,11 +13,19 @@ const ItemsPage = () => {
       item.location_no.includes(search)
   );
 
+  const toggleExpand = (id: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold font-mono text-foreground">物品一覧</h2>
-        <p className="text-muted-foreground text-sm mt-1">倉庫内の全物品を管理</p>
+        <p className="text-muted-foreground text-sm mt-1">物品名をクリックして詳細を表示</p>
       </div>
 
       {/* Search */}
@@ -31,37 +40,58 @@ const ItemsPage = () => {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-border overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary">
-            <tr>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">ID</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">物品名</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">場所</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">棚番号</th>
-              <th className="text-right px-4 py-3 font-medium text-muted-foreground">在庫数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((item) => (
-              <tr key={item.id} className="border-t border-border hover:bg-secondary/50 transition-colors">
-                <td className="px-4 py-3 font-mono text-muted-foreground">{item.id}</td>
-                <td className="px-4 py-3 text-foreground font-medium">{item.item_name}</td>
-                <td className="px-4 py-3 text-muted-foreground flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5" />
-                  {item.location_name}
-                </td>
-                <td className="px-4 py-3 font-mono text-primary">{item.location_no}</td>
-                <td className={`px-4 py-3 text-right font-mono font-semibold ${
-                  item.stock_quantity < 10 ? 'text-destructive' : 'text-foreground'
-                }`}>
-                  {item.stock_quantity}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {/* Accordion list */}
+      <div className="space-y-2">
+        {filtered.map((item) => {
+          const isOpen = expandedIds.has(item.id);
+          return (
+            <div key={item.id} className="rounded-lg border border-border overflow-hidden">
+              <button
+                onClick={() => toggleExpand(item.id)}
+                className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-secondary/50 transition-colors text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <Package className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium text-foreground">{item.item_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {item.stock_quantity < 10 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-medium">
+                      在庫少
+                    </span>
+                  )}
+                  {isOpen ? (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="px-4 py-3 bg-secondary/30 border-t border-border">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                    <div className="flex items-center gap-2">
+                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">保管場所:</span>
+                      <span className="text-foreground font-medium">{item.location_name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">棚番号:</span>
+                      <span className="font-mono text-primary">{item.location_no}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">在庫数:</span>
+                      <span className={`font-mono font-semibold ${item.stock_quantity < 10 ? 'text-destructive' : 'text-foreground'}`}>
+                        {item.stock_quantity}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
