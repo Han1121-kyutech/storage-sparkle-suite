@@ -1,7 +1,7 @@
 import { User, Item, Request } from '@/types';
 
 export const mockUsers: User[] = [
-  { id: 'u-001', user_name: '田中 太郎', role: 'admin' },
+  { id: 'u-001', user_name: '田中 わわわ', role: 'admin' },
   { id: 'u-002', user_name: '佐藤 花子', role: 'general' },
   { id: 'u-003', user_name: '鈴木 一郎', role: 'general' },
 ];
