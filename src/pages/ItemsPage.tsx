@@ -2,9 +2,16 @@ import { useState } from 'react';
 import { mockItems } from '@/data/mockData';
 import { Search, ChevronDown, ChevronRight, MapPin, Package } from 'lucide-react';
 
+/*重複項目の型定義*/
+type GroupedItem = {
+  item_name: string;
+  locations: typeof mockItems;
+  total_stock: number;
+};
+
 const ItemsPage = () => {
   const [search, setSearch] = useState('');
-  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const filtered = mockItems.filter(
     (item) =>
@@ -13,10 +20,28 @@ const ItemsPage = () => {
       item.location_no.includes(search)
   );
 
-  const toggleExpand = (id: number) => {
+   /*重複項目*/
+  const groupedItems: GroupedItem[] = Object.values(
+    filtered.reduce((acc, item) => {
+      if (!acc[item.item_name]) {
+        acc[item.item_name] = {
+          item_name: item.item_name,
+          locations: [],
+          total_stock: 0,
+        };
+      }
+
+      acc[item.item_name].locations.push(item);
+      acc[item.item_name].total_stock += item.stock_quantity;
+
+      return acc;
+    }, {} as Record<string, GroupedItem>)
+  );
+
+  const toggleExpand = (item_name: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      next.has(item_name) ? next.delete(item_name) : next.add(item_name);
       return next;
     });
   };
@@ -42,12 +67,12 @@ const ItemsPage = () => {
 
       {/* Accordion list */}
       <div className="space-y-2">
-        {filtered.map((item) => {
-          const isOpen = expandedIds.has(item.id);
+        {groupedItems.map((item) => {
+          const isOpen = expandedIds.has(item.item_name);
           return (
-            <div key={item.id} className="rounded-lg border border-border overflow-hidden">
+            <div key={item.item_name} className="rounded-lg border border-border overflow-hidden">
               <button
-                onClick={() => toggleExpand(item.id)}
+                onClick={() => toggleExpand(item.item_name)}
                 className="w-full flex items-center justify-between px-4 py-3 bg-card hover:bg-secondary/50 transition-colors text-left"
               >
                 <div className="flex items-center gap-3">
@@ -55,7 +80,7 @@ const ItemsPage = () => {
                   <span className="text-sm font-medium text-foreground">{item.item_name}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  {item.stock_quantity < 10 && (
+                  {item.total_stock < 10 && (
                     <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/20 text-destructive font-medium">
                       在庫少
                     </span>
@@ -69,23 +94,39 @@ const ItemsPage = () => {
               </button>
 
               {isOpen && (
-                <div className="px-4 py-3 bg-secondary/30 border-t border-border">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-                    <div className="flex items-center gap-2">
-                      <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-muted-foreground">保管場所:</span>
-                      <span className="text-foreground font-medium">{item.location_name}</span>
+                <div className="px-4 py-3 bg-secondary/30 border-t border-border space-y-3">
+                  {item.locations.map((loc) => (
+                    <div
+                      key={loc.id}
+                      className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm py-2 border-b border-border last:border-b-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground">保管場所:</span>
+                        <span className="text-foreground font-medium">{loc.location_name}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">棚番号:</span>
+                        <span className="font-mono text-primary">{loc.location_no}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">在庫数:</span>
+                        <span
+                          className={`font-mono font-semibold ${
+                            loc.stock_quantity < 10 ? 'text-destructive' : 'text-foreground'
+                          }`}
+                        >
+                          {loc.stock_quantity}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">棚番号:</span>
-                      <span className="font-mono text-primary">{item.location_no}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-muted-foreground">在庫数:</span>
-                      <span className={`font-mono font-semibold ${item.stock_quantity < 10 ? 'text-destructive' : 'text-foreground'}`}>
-                        {item.stock_quantity}
-                      </span>
-                    </div>
+                  ))}
+
+                  <div className="flex justify-end pt-2 text-sm">
+                    <span className="text-muted-foreground mr-2">合計在庫:</span>
+                    <span className="font-mono font-semibold text-foreground">{item.total_stock}</span>
                   </div>
                 </div>
               )}

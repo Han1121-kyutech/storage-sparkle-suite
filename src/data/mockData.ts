@@ -15,6 +15,8 @@ export const mockItems: Item[] = [
   { id: 6, item_name: 'プリンターインク', location_name: 'B棚', location_no: 'B-07', stock_quantity: 3 },
   { id: 7, item_name: 'ハサミ', location_name: 'A棚', location_no: 'A-02', stock_quantity: 30 },
   { id: 8, item_name: '結束バンド', location_name: 'C棚', location_no: 'C-10', stock_quantity: 500 },
+  { id: 9, item_name: 'ボールペン（黒）', location_name: 'B棚', location_no: 'B-12', stock_quantity: 25 },
+  { id: 10, item_name: 'コピー用紙 A4', location_name: 'A棚', location_no: 'A-08', stock_quantity: 1000 },
 ];
 
 export const mockRequests: Request[] = [
