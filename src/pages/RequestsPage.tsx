@@ -283,7 +283,9 @@ const RequestsPage = () => {
               ) : (
                 userRequests.map((req) => {
                   const item = items.find((i) => i.id === req.item_id);
-                  const user = users.find((u) => u.id === req.user_id);
+                  const user = users.find(
+                    (u) => String(u.id) === String(req.user_id),
+                  );
                   return (
                     <tr
                       key={req.id}
