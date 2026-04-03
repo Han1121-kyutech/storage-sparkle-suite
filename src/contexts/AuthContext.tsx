@@ -72,15 +72,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (exists) throw new Error("このユーザー名は既に使用されています");
 
-      // 2. 登録（IDはDB側で自動生成させるため送信しない）
+      // 2. 登録（IDはDB側で自動生成させるため送信しない、roleは数値の0）
       const { data, error } = await supabase
         .from("users")
-        .insert([{ user_name, role: "general" }])
+        .insert([{ user_name, role: 0 }])
         .select()
         .single();
 
-      if (error)
-        throw new Error("登録に失敗しました。DB設定を確認してください。");
+      if (error) {
+        console.error("Supabase Insert Error:", error);
+        throw new Error(
+          `DBエラー: ${error.message} | 詳細: ${error.details || "なし"}`,
+        );
+      }
 
       setCurrentUser(data as User);
       localStorage.setItem("currentUser", JSON.stringify(data));

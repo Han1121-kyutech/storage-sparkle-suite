@@ -142,10 +142,12 @@ const RequestsPage = () => {
     }
   };
 
-  const userRequests =
-    currentUser?.role === "admin"
-      ? requests
-      : requests.filter((r) => r.user_id === currentUser?.id);
+  // 権限の数値判定（roleが1以上なら管理者として扱う）
+  const isAdmin = (currentUser?.role ?? 0) >= 1;
+
+  const userRequests = isAdmin
+    ? requests
+    : requests.filter((r) => r.user_id === currentUser?.id);
 
   return (
     <div className="space-y-6 pb-20">
@@ -155,9 +157,7 @@ const RequestsPage = () => {
             <ClipboardCheck className="h-6 w-6 text-primary" /> 申請管理
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            {currentUser?.role === "admin"
-              ? "全ユーザーの申請を監視中"
-              : "あなたの申請履歴"}
+            {isAdmin ? "全ユーザーの申請を監視中" : "あなたの申請履歴"}
           </p>
         </div>
         <button
