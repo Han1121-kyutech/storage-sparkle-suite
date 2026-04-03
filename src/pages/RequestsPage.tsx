@@ -11,6 +11,7 @@ import {
   Hash,
   User as UserIcon,
   FileText,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -18,12 +19,14 @@ const statusLabel: Record<Request["status"], string> = {
   pending: "未承認",
   approved: "承認済",
   rejected: "却下",
+  returned: "返却済",
 };
 
 const statusStyle: Record<Request["status"], string> = {
   pending: "bg-primary/20 text-primary border-primary/20",
   approved: "bg-success/20 text-success border-success/20",
   rejected: "bg-destructive/20 text-destructive border-destructive/20",
+  returned: "bg-info/20 text-info border-info/20",
 };
 
 const RequestsPage = () => {
@@ -34,21 +37,19 @@ const RequestsPage = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // フォーム用ステート
   const [selectedItemId, setSelectedItemId] = useState<number>(0);
   const [quantity, setQuantity] = useState(1);
-  const [memo, setMemo] = useState(""); // 申請メモ用のステート
+  const [memo, setMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // --- DBから全データを取得 ---
   const fetchData = async () => {
     try {
       const [reqRes, itemRes, userRes] = await Promise.all([
         supabase
           .from("requests")
           .select("*")
-          .order("created_at", { ascending: false }), // 日時順にソート
-        supabase.from("items").select("*"),
+          .order("created_at", { ascending: false }),
+        supabase.from("items").select("*").order("id", { ascending: true }),
         supabase.from("users").select("*"),
       ]);
 
@@ -74,12 +75,10 @@ const RequestsPage = () => {
     fetchData();
   }, []);
 
-  // --- 申請送信（DB保存） ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
 
-    // 在庫チェック
     const targetItem = items.find((i) => i.id === selectedItemId);
     if (targetItem && quantity > targetItem.stock_quantity) {
       toast.error(
@@ -95,7 +94,7 @@ const RequestsPage = () => {
           item_id: selectedItemId,
           user_id: currentUser.id,
           request_quantity: quantity,
-          memo: memo.trim(), // メモをDBへ送信 [cite: 2026-04-02]
+          memo: memo.trim(),
           status: "pending",
         },
       ]);
@@ -105,12 +104,41 @@ const RequestsPage = () => {
       toast.success("申請を送信しました。管理者の承認を待て。");
       setShowForm(false);
       setQuantity(1);
-      setMemo(""); // フォームリセット
-      fetchData(); // 履歴を即時更新
+      setMemo("");
+      fetchData();
     } catch (error: any) {
       toast.error("申請失敗: " + error.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // --- ユーザー自身による返却処理（在庫連動） ---
+  const handleReturn = async (request: Request) => {
+    try {
+      const item = items.find((i) => i.id === request.item_id);
+      if (!item) throw new Error("対象の物品が見つかりません");
+
+      // 1. 在庫を加算して戻す
+      const { error: itemError } = await supabase
+        .from("items")
+        .update({
+          stock_quantity: item.stock_quantity + request.request_quantity,
+        })
+        .eq("id", item.id);
+      if (itemError) throw itemError;
+
+      // 2. 申請のステータスを「返却済」に更新する
+      const { error: reqError } = await supabase
+        .from("requests")
+        .update({ status: "returned" })
+        .eq("id", request.id);
+      if (reqError) throw reqError;
+
+      toast.success(`「${item.item_name}」を返却し、在庫を戻しました。`);
+      fetchData();
+    } catch (error: any) {
+      toast.error("返却処理に失敗: " + error.message);
     }
   };
 
@@ -141,7 +169,6 @@ const RequestsPage = () => {
         </button>
       </div>
 
-      {/* 新規申請フォーム */}
       {showForm && (
         <form
           onSubmit={handleSubmit}
@@ -174,7 +201,7 @@ const RequestsPage = () => {
               <input
                 type="number"
                 min={1}
-                value={quantity === 0 ? "" : quantity} // 012問題を解消
+                value={quantity === 0 ? "" : quantity}
                 onChange={(e) =>
                   setQuantity(
                     e.target.value === "" ? 0 : Number(e.target.value),
@@ -185,7 +212,6 @@ const RequestsPage = () => {
                 required
               />
             </div>
-            {/* 備考・用途入力欄を追加 [cite: 2026-04-02] */}
             <div className="space-y-2 sm:col-span-2">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 備考・用途
@@ -213,7 +239,6 @@ const RequestsPage = () => {
         </form>
       )}
 
-      {/* 申請履歴（横スクロール対応） */}
       <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left min-w-[850px]">
@@ -276,7 +301,6 @@ const RequestsPage = () => {
                       <td className="px-4 py-4 text-right font-mono font-black">
                         {req.request_quantity}
                       </td>
-                      {/* メモの表示 [cite: 2026-04-02] */}
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground max-w-[200px] truncate">
                           {req.memo ? (
@@ -290,11 +314,22 @@ const RequestsPage = () => {
                         </div>
                       </td>
                       <td className="px-4 py-4 text-center">
-                        <span
-                          className={`inline-block px-3 py-1 rounded border text-[10px] font-black uppercase tracking-widest ${statusStyle[req.status]}`}
-                        >
-                          {statusLabel[req.status]}
-                        </span>
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <span
+                            className={`inline-block px-3 py-1 rounded border text-[10px] font-black uppercase tracking-widest ${statusStyle[req.status]}`}
+                          >
+                            {statusLabel[req.status]}
+                          </span>
+                          {/* 承認済みの場合のみ、ユーザー自身が返却できるボタンを表示 */}
+                          {req.status === "approved" && (
+                            <button
+                              onClick={() => handleReturn(req)}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold shadow-sm transition-all active:scale-95"
+                            >
+                              <RotateCcw className="h-3 w-3" /> 返却する
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

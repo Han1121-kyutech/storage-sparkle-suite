@@ -18,7 +18,7 @@ export interface Request {
   item_id: number;
   user_id: string;
   request_quantity: number;
-  status: "pending" | "approved" | "rejected";
-  memo?: string; // ← 申請時のメモを追加
-  created_at?: string; // ← 作成日時を追加
+  status: "pending" | "approved" | "rejected" | "returned"; // 'returned' を含めた最新の状態に統一
+  memo?: string; // 申請時のメモ
+  created_at?: string; // 作成日時
 }

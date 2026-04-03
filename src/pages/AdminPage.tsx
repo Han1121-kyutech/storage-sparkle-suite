@@ -11,6 +11,8 @@ import {
   ClipboardList,
   Package,
   User as UserIcon,
+  Hash,
+  RotateCcw,
 } from "lucide-react";
 import ItemFormModal from "@/components/ItemFormModal";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
@@ -20,21 +22,22 @@ const statusLabel: Record<Request["status"], string> = {
   pending: "未承認",
   approved: "承認済",
   rejected: "却下",
+  returned: "返却済",
 };
 
 const statusStyle: Record<Request["status"], string> = {
   pending: "bg-primary/20 text-primary border-primary/20",
   approved: "bg-success/20 text-success border-success/20",
   rejected: "bg-destructive/20 text-destructive border-destructive/20",
+  returned: "bg-info/20 text-info border-info/20",
 };
 
 const AdminPage = () => {
   const [requests, setRequests] = useState<Request[]>([]);
   const [items, setItems] = useState<Item[]>([]);
-  const [users, setUsers] = useState<User[]>([]); // ユーザー情報を格納するステートを追加
+  const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // --- 全データの一括取得・更新 (即時反映用に追加) ---
   const reloadAll = async () => {
     try {
       const [itemRes, reqRes, userRes] = await Promise.all([
@@ -53,7 +56,6 @@ const AdminPage = () => {
     }
   };
 
-  // ページ読み込み時に一括取得
   useEffect(() => {
     const init = async () => {
       setLoading(true);
@@ -63,25 +65,24 @@ const AdminPage = () => {
     init();
   }, []);
 
-  // 物品管理用の状態
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
 
-  // --- 申請の承認・却下処理 (在庫連動ロジックを追加) --- [cite: 2026-04-03]
   const updateRequestStatus = async (id: number, status: Request["status"]) => {
     const targetRequest = requests.find((r) => r.id === id);
     if (!targetRequest) return;
 
     try {
-      // 承認の場合のみ在庫を減らす
+      const item = items.find((i) => i.id === targetRequest.item_id);
+      if (!item) throw new Error("物品が見つかりません");
+
+      // 在庫連動ロジック
       if (status === "approved") {
-        const item = items.find((i) => i.id === targetRequest.item_id);
-        if (!item || item.stock_quantity < targetRequest.request_quantity) {
+        if (item.stock_quantity < targetRequest.request_quantity) {
           toast.error("在庫不足のため承認不可");
           return;
         }
-
         const { error: itemError } = await supabase
           .from("items")
           .update({
@@ -90,9 +91,18 @@ const AdminPage = () => {
           })
           .eq("id", item.id);
         if (itemError) throw itemError;
+      } else if (status === "returned") {
+        // 返却時は在庫を戻す
+        const { error: itemError } = await supabase
+          .from("items")
+          .update({
+            stock_quantity:
+              item.stock_quantity + targetRequest.request_quantity,
+          })
+          .eq("id", item.id);
+        if (itemError) throw itemError;
       }
 
-      // ステータスを更新
       const { error: reqError } = await supabase
         .from("requests")
         .update({ status: status })
@@ -100,7 +110,6 @@ const AdminPage = () => {
       if (reqError) throw reqError;
 
       toast.success(`ステータスを ${statusLabel[status]} に更新しました`);
-      // 成功後、即座に画面全体（在庫数と申請リスト）を更新
       await reloadAll();
     } catch (error: any) {
       toast.error("更新失敗: " + error.message);
@@ -108,7 +117,7 @@ const AdminPage = () => {
   };
 
   const handleSaveItem = () => {
-    reloadAll(); // 保存後も即時反映
+    reloadAll();
     setFormOpen(false);
     setEditingItem(null);
   };
@@ -122,7 +131,7 @@ const AdminPage = () => {
         .eq("id", deleteTarget.id);
       if (error) throw error;
       toast.success(`${deleteTarget.item_name} を削除しました`);
-      reloadAll(); // 削除後も即時反映
+      reloadAll();
     } catch (error: any) {
       toast.error("削除失敗: " + error.message);
     } finally {
@@ -148,7 +157,6 @@ const AdminPage = () => {
         </p>
       </div>
 
-      {/* ── 物品データベースセクション ── */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
@@ -241,7 +249,6 @@ const AdminPage = () => {
         </div>
       </section>
 
-      {/* ── 物品出庫申請セクション ── */}
       <section className="space-y-4">
         <h3 className="text-lg font-bold text-foreground">物品出庫申請</h3>
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
@@ -249,13 +256,13 @@ const AdminPage = () => {
             <table className="w-full text-sm text-left min-w-[900px]">
               <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
                 <tr>
-                  <th className="px-4 py-4 w-20">申請ID</th>
+                  <th className="px-4 py-4 w-20">ID</th>
                   <th className="px-4 py-4 w-24">状態</th>
                   <th className="px-4 py-4">申請者</th>
-                  <th className="px-4 py-4">申請物品</th>
+                  <th className="px-4 py-4">物品</th>
                   <th className="px-4 py-4 text-right">数量</th>
                   <th className="px-4 py-4">メモ</th>
-                  <th className="px-4 py-4 text-center">判定</th>
+                  <th className="px-4 py-4 text-center">アクション</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
@@ -321,7 +328,7 @@ const AdminPage = () => {
                                 onClick={() =>
                                   updateRequestStatus(req.id, "approved")
                                 }
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-white text-xs font-bold hover:opacity-90 shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
                               >
                                 <CheckCircle className="h-3 w-3" /> 承認
                               </button>
@@ -329,9 +336,20 @@ const AdminPage = () => {
                                 onClick={() =>
                                   updateRequestStatus(req.id, "rejected")
                                 }
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-destructive text-white text-xs font-bold hover:opacity-90 shadow-sm"
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-destructive text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
                               >
-                                <XCircle className="h-3 w-3" /> 却下
+                                <XCircle className="h-3 w-3" /> 却却
+                              </button>
+                            </div>
+                          ) : req.status === "approved" ? (
+                            <div className="flex justify-center">
+                              <button
+                                onClick={() =>
+                                  updateRequestStatus(req.id, "returned")
+                                }
+                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-info text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
+                              >
+                                <RotateCcw className="h-3 w-3" /> 返却を確認
                               </button>
                             </div>
                           ) : (
