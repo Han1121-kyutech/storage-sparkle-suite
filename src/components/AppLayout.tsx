@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   X,
+  Users, // 追加：ユーザー管理用のアイコン
 } from "lucide-react";
 
 const AppLayout = ({ children }: { children: React.ReactNode }) => {
@@ -24,8 +25,14 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
     { to: "/requests", label: "申請一覧", icon: ClipboardList },
   ];
 
+  // 管理者(1)以上のメニュー
   if ((currentUser?.role ?? 0) >= 1) {
-    navItems.push({ to: "/admin", label: "管理", icon: Shield });
+    navItems.push({ to: "/admin", label: "物品管理・承認", icon: Shield });
+  }
+
+  // --- 【追加】最高管理者(2)専用のメニュー ---
+  if ((currentUser?.role ?? 0) >= 2) {
+    navItems.push({ to: "/users", label: "ユーザー管理", icon: Users });
   }
 
   // メニューのリンクを押した時に、スマホならメニューを閉じる処理
@@ -35,7 +42,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
   return (
     <div className="flex min-h-screen bg-background">
-      {/* 📱 スマホ用のトップヘッダー（PCでは md:hidden で非表示になる） */}
+      {/* 📱 スマホ用のトップヘッダー */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-card border-b border-border flex items-center justify-between px-4 z-40">
         <div className="flex items-center gap-2">
           <Warehouse className="h-6 w-6 text-primary" />
@@ -55,7 +62,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
         </button>
       </div>
 
-      {/* 📱 スマホでメニューが開いている時の黒い半透明背景（画面外タップで閉じる用） */}
+      {/* 📱 スマホでメニューが開いている時の黒い半透明背景 */}
       {isMobileMenuOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden"
@@ -63,13 +70,11 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
         />
       )}
 
-      {/* 💻 サイドバー（PCでは常に表示、スマホではスライドして出てくる） */}
+      {/* 💻 サイドバー */}
       <aside
         className={`
           w-64 bg-card border-r border-border flex flex-col
-          /* PC用（md以上）の設定：相対配置にして常に表示 */
           md:relative md:translate-x-0
-          /* スマホ用の設定：絶対配置にして画面外に隠し、isMobileMenuOpenがtrueの時だけスライドイン */
           fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out
           ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
         `}
@@ -81,7 +86,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
               倉庫管理
             </h1>
           </div>
-          {/* サイドバー内のスマホ用閉じるボタン（PCでは非表示） */}
+          {/* サイドバー内のスマホ用閉じるボタン */}
           <button
             className="md:hidden"
             onClick={() => setIsMobileMenuOpen(false)}
@@ -136,9 +141,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
       </aside>
 
       {/* 📦 メインコンテンツ部分 */}
-      {/* スマホの時はトップヘッダー（h-16=pt-16）の分だけ中身を下にずらす。PCの時はゼロ（md:pt-0） */}
       <main className="flex-1 overflow-auto pt-16 md:pt-0">
-        {/* スマホの時は余白を小さく（p-4）、PCの時は大きく（md:p-8）して圧迫感をなくす */}
         <div className="p-4 md:p-8">{children}</div>
       </main>
     </div>

@@ -11,7 +11,7 @@ import { supabase } from "@/lib/supabase";
 type AuthContextType = {
   currentUser: User | null;
   isLoading: boolean;
-  login: (user_name: string, password?: string) => Promise<void>; // 引数にpasswordを追加
+  login: (user_name: string, password?: string) => Promise<void>;
   register: (user_name: string) => Promise<void>;
   logout: () => void;
 };
@@ -53,6 +53,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) throw new Error("DB接続エラーが発生しました");
       if (!data) throw new Error("そのユーザー名は登録されていません");
 
+      // --- 【追加】凍結（論理削除）チェック ---
+      // is_activeがfalseの場合、パスワードが合っていようが問答無用で弾く
+      if (data.is_active === false) {
+        throw new Error("このアカウントは凍結されています。");
+      }
+
       // --- 管理者専用のパスワード検証ロジック ---
       if (data.role >= 1) {
         // パスワードがまだ送られてきていない場合はUI側に要求フラグを返す
@@ -85,7 +91,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const { data, error } = await supabase
         .from("users")
-        .insert([{ user_name, role: 0 }])
+        .insert([{ user_name, role: 0 }]) // is_activeはDB側で自動的にTRUEになる
         .select()
         .single();
 

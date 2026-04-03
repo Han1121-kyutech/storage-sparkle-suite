@@ -10,6 +10,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import ItemsPage from "@/pages/ItemsPage";
 import RequestsPage from "@/pages/RequestsPage";
 import AdminPage from "@/pages/AdminPage";
+import UsersPage from "@/pages/UsersPage"; // 追加：ユーザー管理画面
 import NotFound from "./pages/NotFound.tsx";
 import { useEffect } from "react";
 import { supabase } from "./lib/supabase.ts";
@@ -74,6 +75,15 @@ const App = () => {
                 element={
                   <ProtectedRoute minRole={1}>
                     <AdminPage />
+                  </ProtectedRoute>
+                }
+              />
+              {/* 追加：最高管理者(2)専用のルート */}
+              <Route
+                path="/users"
+                element={
+                  <ProtectedRoute minRole={2}>
+                    <UsersPage />
                   </ProtectedRoute>
                 }
               />

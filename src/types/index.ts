@@ -3,6 +3,7 @@ export interface User {
   user_name: string;
   role: 0 | 1 | 2;
   password?: string;
+  is_active?: boolean;
 }
 
 export interface Item {
