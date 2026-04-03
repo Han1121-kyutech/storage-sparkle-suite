@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // ルーティング用フックを追加
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Item, Request } from "@/types";
@@ -8,11 +9,13 @@ import {
   AlertTriangle,
   CheckCircle,
   Loader2,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const DashboardPage = () => {
   const { currentUser } = useAuth();
+  const navigate = useNavigate(); // ナビゲーションの初期化
   const [items, setItems] = useState<Item[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +51,7 @@ const DashboardPage = () => {
   // 管理者以上は全ての申請を、一般ユーザーは自分の申請だけをカウントする
   const targetRequests = isAdmin
     ? requests
-    : requests.filter((r) => r.user_id === currentUser?.id);
+    : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
   const lowStockItems = items.filter((i) => i.stock_quantity < 10);
   const pendingRequests = targetRequests.filter((r) => r.status === "pending");
@@ -56,30 +59,35 @@ const DashboardPage = () => {
     (r) => r.status === "approved",
   );
 
+  // パネルの定義に遷移先(path)を追加
   const stats = [
     {
       label: "登録物品数",
       value: items.length,
       icon: Package,
       color: "text-info",
+      path: "/items", // 物品一覧へ
     },
     {
       label: isAdmin ? "全体の未承認申請" : "あなたの未承認申請",
       value: pendingRequests.length,
       icon: ClipboardList,
       color: "text-primary",
+      path: isAdmin ? "/admin" : "/requests", // 管理者は管理パネル、一般は申請画面へ
     },
     {
       label: "在庫少アラート",
       value: lowStockItems.length,
       icon: AlertTriangle,
       color: "text-destructive",
+      path: isAdmin ? "/admin" : "/items",
     },
     {
       label: isAdmin ? "全体の承認済み" : "あなたの承認済み",
       value: approvedRequests.length,
       icon: CheckCircle,
       color: "text-success",
+      path: isAdmin ? "/admin" : "/requests",
     },
   ];
 
@@ -109,28 +117,38 @@ const DashboardPage = () => {
         {stats.map((s) => (
           <div
             key={s.label}
-            className="p-5 rounded-lg bg-card border border-border shadow-sm hover:shadow-md transition-all"
+            onClick={() => navigate(s.path)}
+            className="p-5 rounded-lg bg-card border border-border shadow-sm transition-all cursor-pointer hover:shadow-md hover:border-primary/50 hover:-translate-y-0.5 group relative"
           >
             <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-muted-foreground">
+              <p className="text-sm font-bold text-muted-foreground group-hover:text-foreground transition-colors">
                 {s.label}
               </p>
               <s.icon className={`h-5 w-5 ${s.color}`} />
             </div>
-            <p className="text-3xl font-black font-mono mt-2 text-foreground">
+            <p className="text-3xl font-black font-mono mt-2 text-foreground group-hover:text-primary transition-colors">
               {s.value}
             </p>
+            <ChevronRight className="h-4 w-4 absolute bottom-4 right-4 opacity-0 group-hover:opacity-50 transition-opacity" />
           </div>
         ))}
       </div>
 
-      {/* 在庫少アラート (管理者以上にのみ意味があるが、一般ユーザーへの警告として見せても良い) */}
+      {/* 在庫少アラート */}
       {lowStockItems.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
-            在庫が少ない物品
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              在庫が少ない物品
+            </h3>
+            <button
+              onClick={() => navigate(isAdmin ? "/admin" : "/items")}
+              className="text-xs font-bold text-muted-foreground hover:text-primary flex items-center gap-1"
+            >
+              詳細を見る <ChevronRight className="h-3 w-3" />
+            </button>
+          </div>
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
@@ -145,9 +163,10 @@ const DashboardPage = () => {
                   {lowStockItems.map((item) => (
                     <tr
                       key={item.id}
-                      className="hover:bg-secondary/30 transition-colors"
+                      onClick={() => navigate(isAdmin ? "/admin" : "/items")}
+                      className="hover:bg-secondary/30 transition-colors cursor-pointer group"
                     >
-                      <td className="px-4 py-3 text-foreground font-bold">
+                      <td className="px-4 py-3 text-foreground font-bold group-hover:text-primary transition-colors">
                         {item.item_name}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">

@@ -12,6 +12,7 @@ import {
   FileText,
   Plus,
   Loader2,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -31,6 +32,8 @@ const ItemsPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [newItem, setNewItem] = useState({
     item_name: "",
+    label_no: "",
+    specifications: "",
     location_name: "",
     location_no: "",
     stock_quantity: 0,
@@ -59,6 +62,8 @@ const ItemsPage = () => {
       const { error } = await supabase.from("items").insert([
         {
           item_name: newItem.item_name.trim(),
+          label_no: newItem.label_no.trim(),
+          specifications: newItem.specifications.trim(),
           location_name: newItem.location_name.trim(),
           location_no: newItem.location_no.trim(),
           stock_quantity: Number(newItem.stock_quantity),
@@ -68,14 +73,15 @@ const ItemsPage = () => {
 
       if (error) throw error;
 
-      // 在庫管理用Botへ通知
       await sendInventoryNotification(
-        `📦 **新規物品登録**\n物品名: ${newItem.item_name}\n保管場所: ${newItem.location_name} (${newItem.location_no})\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name || "不明"}`,
+        `📦 **新規物品登録**\n物品名: ${newItem.item_name}\nラベル: ${newItem.label_no || "なし"}\n規格: ${newItem.specifications || "なし"}\n保管場所: ${newItem.location_name} (${newItem.location_no})\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name || "不明"}`,
       );
 
       toast.success("物品を追加しました");
       setNewItem({
         item_name: "",
+        label_no: "",
+        specifications: "",
         location_name: "",
         location_no: "",
         stock_quantity: 0,
@@ -89,13 +95,17 @@ const ItemsPage = () => {
     }
   };
 
-  const filtered = items.filter(
-    (item) =>
-      item.item_name.includes(search) ||
-      item.location_name.includes(search) ||
-      item.location_no.includes(search) ||
-      (item.memo && item.memo.includes(search)),
-  );
+  const filtered = items.filter((item) => {
+    const q = search.toLowerCase();
+    return (
+      item.item_name.toLowerCase().includes(q) ||
+      item.location_name.toLowerCase().includes(q) ||
+      item.location_no.toLowerCase().includes(q) ||
+      (item.label_no && item.label_no.toLowerCase().includes(q)) ||
+      (item.specifications && item.specifications.toLowerCase().includes(q)) ||
+      (item.memo && item.memo.toLowerCase().includes(q))
+    );
+  });
 
   const groupedItems: GroupedItem[] = Object.values(
     filtered.reduce(
@@ -138,100 +148,131 @@ const ItemsPage = () => {
         <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
           <Plus className="h-4 w-4 text-primary" /> 新規物品登録
         </h3>
-        <form
-          onSubmit={handleAddItem}
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-        >
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase opacity-50">
-              物品名
-            </label>
-            <input
-              type="text"
-              required
-              value={newItem.item_name}
-              onChange={(e) =>
-                setNewItem({ ...newItem, item_name: e.target.value })
-              }
-              className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
-              placeholder="例: マスキングテープ"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase opacity-50">
-              保管場所
-            </label>
-            <input
-              type="text"
-              required
-              value={newItem.location_name}
-              onChange={(e) =>
-                setNewItem({ ...newItem, location_name: e.target.value })
-              }
-              className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
-              placeholder="例: 第1倉庫"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase opacity-50">
-              棚番号
-            </label>
-            <input
-              type="text"
-              required
-              value={newItem.location_no}
-              onChange={(e) =>
-                setNewItem({ ...newItem, location_no: e.target.value })
-              }
-              className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
-              placeholder="例: A-1"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase opacity-50">
-              在庫数
-            </label>
-            <input
-              type="number"
-              required
-              min="0"
-              value={newItem.stock_quantity === 0 ? "" : newItem.stock_quantity}
-              onChange={(e) =>
-                setNewItem({
-                  ...newItem,
-                  stock_quantity:
-                    e.target.value === "" ? 0 : Number(e.target.value),
-                })
-              }
-              onFocus={(e) => e.target.select()}
-              className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
-            />
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-[10px] font-bold uppercase opacity-50">
-              備考・用途（メモ）
-            </label>
-            <input
-              type="text"
-              value={newItem.memo}
-              onChange={(e) => setNewItem({ ...newItem, memo: e.target.value })}
-              className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
-              placeholder="用途や特記事項を入力"
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-primary text-black font-bold py-2 rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm active:scale-[0.98]"
-            >
-              {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              追加する
-            </button>
+        <form onSubmit={handleAddItem} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                物品名
+              </label>
+              <input
+                type="text"
+                required
+                value={newItem.item_name}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, item_name: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="例: マスキングテープ"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                ラベル番号
+              </label>
+              <input
+                type="text"
+                value={newItem.label_no}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, label_no: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="例: DR-01"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                規格 (大きさ・長さ等)
+              </label>
+              <input
+                type="text"
+                value={newItem.specifications}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, specifications: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="例: 30m / 5.4×7.2m"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                保管場所
+              </label>
+              <input
+                type="text"
+                required
+                value={newItem.location_name}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, location_name: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="例: 第1倉庫"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                棚番号
+              </label>
+              <input
+                type="text"
+                required
+                value={newItem.location_no}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, location_no: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="例: A-1"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                在庫数
+              </label>
+              <input
+                type="number"
+                required
+                min="0"
+                value={
+                  newItem.stock_quantity === 0 ? "" : newItem.stock_quantity
+                }
+                onChange={(e) =>
+                  setNewItem({
+                    ...newItem,
+                    stock_quantity:
+                      e.target.value === "" ? 0 : Number(e.target.value),
+                  })
+                }
+                onFocus={(e) => e.target.select()}
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+              />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] font-bold uppercase opacity-50">
+                備考・用途（メモ）
+              </label>
+              <input
+                type="text"
+                value={newItem.memo}
+                onChange={(e) =>
+                  setNewItem({ ...newItem, memo: e.target.value })
+                }
+                className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
+                placeholder="用途や特記事項を入力"
+              />
+            </div>
+            <div className="flex items-end lg:col-span-1">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full bg-primary text-black font-bold py-2 rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm active:scale-[0.98]"
+              >
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                追加する
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -242,7 +283,7 @@ const ItemsPage = () => {
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
           type="text"
-          placeholder="物品名・場所・メモで検索..."
+          placeholder="物品名・ラベル・場所・メモで検索..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
@@ -300,7 +341,7 @@ const ItemsPage = () => {
                         key={loc.id}
                         className="py-3 border-b border-border/50 last:border-b-0 space-y-2"
                       >
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-[13px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-[13px]">
                           <div className="flex items-center gap-2">
                             <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="text-muted-foreground">場所:</span>
@@ -313,6 +354,23 @@ const ItemsPage = () => {
                             <span className="font-mono text-primary font-bold">
                               {loc.location_no}
                             </span>
+                          </div>
+                          <div className="flex items-center gap-2 col-span-1 sm:col-span-2">
+                            {loc.label_no ? (
+                              <span className="text-[10px] font-mono bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20 w-fit flex items-center gap-1">
+                                <Tag className="h-2.5 w-2.5" />
+                                {loc.label_no}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">
+                                -
+                              </span>
+                            )}
+                            {loc.specifications && (
+                              <span className="text-xs text-muted-foreground ml-2">
+                                {loc.specifications}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-muted-foreground">在庫:</span>

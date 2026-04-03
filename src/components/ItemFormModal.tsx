@@ -13,7 +13,7 @@ import { toast } from "sonner";
 interface ItemFormModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (item: Item) => void; // 1. 引数を受け取るように戻す
+  onSave: (item?: Item) => void;
   item?: Item | null;
 }
 
@@ -22,22 +22,28 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
   const [locationName, setLocationName] = useState("");
   const [locationNo, setLocationNo] = useState("");
   const [stockQuantity, setStockQuantity] = useState(0);
-  const [memo, setMemo] = useState(""); // 備考も追加
+  const [memo, setMemo] = useState("");
+  const [labelNo, setLabelNo] = useState("");
+  const [specifications, setSpecifications] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (item) {
-      setItemName(item.item_name);
-      setLocationName(item.location_name);
-      setLocationNo(item.location_no);
-      setStockQuantity(item.stock_quantity);
+      setItemName(item.item_name || "");
+      setLocationName(item.location_name || "");
+      setLocationNo(item.location_no || "");
+      setStockQuantity(item.stock_quantity || 0);
       setMemo(item.memo || "");
+      setLabelNo(item.label_no || "");
+      setSpecifications(item.specifications || "");
     } else {
       setItemName("");
       setLocationName("");
       setLocationNo("");
       setStockQuantity(0);
       setMemo("");
+      setLabelNo("");
+      setSpecifications("");
     }
   }, [item, open]);
 
@@ -51,13 +57,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       location_no: locationNo.trim(),
       stock_quantity: stockQuantity,
       memo: memo.trim(),
+      label_no: labelNo.trim(),
+      specifications: specifications.trim(),
     };
 
     try {
       let resultData: Item | null = null;
 
       if (item && item.id) {
-        // 更新処理：.select().single() を追加して更新後のデータを取得
         const { data, error: updateError } = await supabase
           .from("items")
           .update(itemData)
@@ -68,7 +75,6 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
         if (updateError) throw updateError;
         resultData = data;
       } else {
-        // 新規登録：.select().single() を追加して作成されたデータを取得
         const { data, error: insertError } = await supabase
           .from("items")
           .insert([itemData])
@@ -81,9 +87,10 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
 
       toast.success(item ? "更新しました" : "追加しました");
 
-      // 2. 取得した保存後のデータを AdminPage に渡す
       if (resultData) {
         onSave(resultData);
+      } else {
+        onSave();
       }
       onClose();
     } catch (error: any) {
@@ -96,13 +103,13 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="bg-card border-border max-w-md w-[95vw]">
+      <DialogContent className="bg-card border-border max-w-md w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground font-mono">
             {item ? "物品を編集" : "物品を追加"}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground text-xs">
-            物品の詳細情報を入力してください。
+            物品の詳細情報を入力してください。ラベルがない場合は空欄で構いません。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -117,6 +124,32 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               onChange={(e) => setItemName(e.target.value)}
               className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none"
             />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase opacity-50">
+                ラベル番号
+              </label>
+              <input
+                disabled={isSubmitting}
+                value={labelNo}
+                onChange={(e) => setLabelNo(e.target.value)}
+                placeholder="例: DR-01"
+                className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase opacity-50">
+                規格 (大きさ・長さ等)
+              </label>
+              <input
+                disabled={isSubmitting}
+                value={specifications}
+                onChange={(e) => setSpecifications(e.target.value)}
+                placeholder="例: 30m / 5.4×7.2m"
+                className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">

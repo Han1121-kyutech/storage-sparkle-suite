@@ -8,12 +8,14 @@ import {
   Loader2,
   ClipboardCheck,
   User as UserIcon,
-  FileText,
   RotateCcw,
   Search,
   ArrowUpDown,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
+  Archive,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { sendRequestNotification } from "@/utils/notificationUtils";
@@ -32,6 +34,18 @@ const statusStyle: Record<Request["status"], string> = {
   returned: "bg-info/20 text-info border-info/20",
 };
 
+const typeLabel: Record<string, string> = {
+  checkout: "貸出",
+  consume: "消費",
+  dispose: "廃棄",
+};
+
+const typeStyle: Record<string, string> = {
+  checkout: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+  consume: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  dispose: "bg-red-500/10 text-red-500 border-red-500/20",
+};
+
 type SortConfig = {
   key: keyof Request | "item_name" | "user_name";
   direction: "asc" | "desc";
@@ -39,8 +53,8 @@ type SortConfig = {
 
 const RequestsPage = () => {
   const { currentUser } = useAuth();
+  const isAdmin = (currentUser?.role ?? 0) >= 1;
 
-  // 状態定義
   const [showForm, setShowForm] = useState(false);
   const [requests, setRequests] = useState<Request[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -52,7 +66,13 @@ const RequestsPage = () => {
     direction: "desc",
   });
 
+  // アコーディオンの開閉状態（未処理は常に開く、処理済みは最初は閉じる）
+  const [isPendingOpen, setIsPendingOpen] = useState(true);
+  const [isProcessedOpen, setIsProcessedOpen] = useState(false);
+
   const [selectedItemId, setSelectedItemId] = useState<number>(0);
+  const [requestType, setRequestType] =
+    useState<Request["request_type"]>("checkout");
   const [quantity, setQuantity] = useState(1);
   const [memo, setMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -94,18 +114,21 @@ const RequestsPage = () => {
   };
 
   const filteredAndSortedRequests = useMemo(() => {
-    const isAdmin = (currentUser?.role ?? 0) >= 1;
     const baseRequests = isAdmin
       ? requests
-      : requests.filter((r) => r.user_id === currentUser?.id);
+      : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
     const filtered = baseRequests.filter((req) => {
       const itemName = items.find((i) => i.id === req.item_id)?.item_name ?? "";
-      const userName = users.find((u) => u.id === req.user_id)?.user_name ?? "";
+      const userName =
+        users.find((u) => String(u.id) === String(req.user_id))?.user_name ??
+        "";
+      const typeName = typeLabel[req.request_type || "checkout"];
       const searchLower = searchTerm.toLowerCase();
       return (
         itemName.toLowerCase().includes(searchLower) ||
         userName.toLowerCase().includes(searchLower) ||
+        typeName.toLowerCase().includes(searchLower) ||
         (req.memo && req.memo.toLowerCase().includes(searchLower))
       );
     });
@@ -116,8 +139,12 @@ const RequestsPage = () => {
         aV = items.find((i) => i.id === a.item_id)?.item_name ?? "";
         bV = items.find((i) => i.id === b.item_id)?.item_name ?? "";
       } else if (sortConfig.key === "user_name") {
-        aV = users.find((u) => u.id === a.user_id)?.user_name ?? "";
-        bV = users.find((u) => u.id === b.user_id)?.user_name ?? "";
+        aV =
+          users.find((u) => String(u.id) === String(a.user_id))?.user_name ??
+          "";
+        bV =
+          users.find((u) => String(u.id) === String(b.user_id))?.user_name ??
+          "";
       } else {
         aV = a[sortConfig.key as keyof Request] ?? "";
         bV = b[sortConfig.key as keyof Request] ?? "";
@@ -130,12 +157,21 @@ const RequestsPage = () => {
           ? -1
           : 1;
     });
-  }, [requests, items, users, currentUser, searchTerm, sortConfig]);
+  }, [requests, items, users, currentUser, searchTerm, sortConfig, isAdmin]);
+
+  // ここで未処理と処理済みに分割する
+  const pendingRequests = filteredAndSortedRequests.filter(
+    (r) => r.status === "pending",
+  );
+  const processedRequests = filteredAndSortedRequests.filter(
+    (r) => r.status !== "pending",
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
     const targetItem = items.find((i) => i.id === selectedItemId);
+
     if (targetItem && quantity > targetItem.stock_quantity)
       return toast.error(`在庫不足（最大: ${targetItem.stock_quantity}）`);
 
@@ -145,6 +181,7 @@ const RequestsPage = () => {
         {
           item_id: selectedItemId,
           user_id: currentUser.id,
+          request_type: requestType,
           request_quantity: quantity,
           memo: memo.trim(),
           status: "pending",
@@ -152,15 +189,15 @@ const RequestsPage = () => {
       ]);
       if (error) throw error;
 
-      // 申請用Botへ通知
       await sendRequestNotification(
-        `📝 **新規申請**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name}\n数量: ${quantity}\n備考: ${memo || "なし"}`,
+        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name}\n数量: ${quantity}\n備考: ${memo || "なし"}`,
       );
 
       toast.success("申請完了");
       setShowForm(false);
       setQuantity(1);
       setMemo("");
+      setRequestType("checkout");
       fetchData();
     } catch (error: any) {
       toast.error("申請失敗: " + error.message);
@@ -184,9 +221,8 @@ const RequestsPage = () => {
         .update({ status: "returned" })
         .eq("id", request.id);
 
-      // 申請用Botへ通知
       await sendRequestNotification(
-        `🔄 **返却完了**\n申請者: ${users.find((u) => u.id === request.user_id)?.user_name}\n物品: ${item.item_name}\n数量: ${request.request_quantity}`,
+        `🔄 **返却完了**\n申請者: ${users.find((u) => String(u.id) === String(request.user_id))?.user_name}\n物品: ${item.item_name}\n数量: ${request.request_quantity}`,
       );
 
       toast.success("返却完了");
@@ -205,15 +241,134 @@ const RequestsPage = () => {
       <ChevronDown className="h-3 w-3 text-primary" />
     );
 
+  // テーブルのレンダリングを共通化
+  const renderRequestTable = (reqData: Request[]) => (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-left min-w-[900px]">
+        <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
+          <tr>
+            <th
+              onClick={() => handleSort("id")}
+              className="px-4 py-4 w-16 cursor-pointer"
+            >
+              ID {getSortIcon("id")}
+            </th>
+            <th
+              onClick={() => handleSort("request_type")}
+              className="px-4 py-4 w-24 cursor-pointer"
+            >
+              種別 {getSortIcon("request_type")}
+            </th>
+            <th
+              onClick={() => handleSort("item_name")}
+              className="px-4 py-4 cursor-pointer"
+            >
+              物品 {getSortIcon("item_name")}
+            </th>
+            <th
+              onClick={() => handleSort("user_name")}
+              className="px-4 py-4 cursor-pointer"
+            >
+              申請者 {getSortIcon("user_name")}
+            </th>
+            <th
+              onClick={() => handleSort("request_quantity")}
+              className="px-4 py-4 text-right cursor-pointer"
+            >
+              数量 {getSortIcon("request_quantity")}
+            </th>
+            <th className="px-4 py-4">備考</th>
+            <th
+              onClick={() => handleSort("status")}
+              className="px-4 py-4 text-center cursor-pointer"
+            >
+              状態 {getSortIcon("status")}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {reqData.length === 0 ? (
+            <tr>
+              <td
+                colSpan={7}
+                className="text-center py-10 text-muted-foreground italic"
+              >
+                該当するデータがありません
+              </td>
+            </tr>
+          ) : (
+            reqData.map((req) => {
+              const item = items.find((i) => i.id === req.item_id);
+              const user = users.find(
+                (u) => String(u.id) === String(req.user_id),
+              );
+              const rType = req.request_type || "checkout";
+
+              return (
+                <tr
+                  key={req.id}
+                  className="hover:bg-secondary/30 transition-colors"
+                >
+                  <td className="px-4 py-4 font-mono text-xs opacity-50">
+                    #{req.id}
+                  </td>
+                  <td className="px-4 py-4">
+                    <span
+                      className={`px-2 py-1 rounded border text-[10px] font-bold ${typeStyle[rType]}`}
+                    >
+                      {typeLabel[rType]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 font-bold text-foreground">
+                    {item?.item_name || "不明"}
+                  </td>
+                  <td className="px-4 py-4 text-xs">
+                    <div className="flex items-center gap-1">
+                      <UserIcon className="h-3 w-3 opacity-70" />
+                      {user?.user_name || "退会"}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 text-right font-mono font-black text-foreground">
+                    {req.request_quantity}
+                  </td>
+                  <td className="px-4 py-4 text-xs italic">
+                    {req.memo || "-"}
+                  </td>
+                  <td className="px-4 py-4 text-center">
+                    <div className="flex flex-col items-center gap-2">
+                      <span
+                        className={`px-3 py-1 rounded border text-[10px] font-black uppercase ${statusStyle[req.status]}`}
+                      >
+                        {statusLabel[req.status]}
+                      </span>
+                      {req.status === "approved" && rType === "checkout" && (
+                        <button
+                          onClick={() => handleReturn(req)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold active:scale-95 transition-all"
+                        >
+                          <RotateCcw className="h-3 w-3" /> 返却
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+
   return (
     <div className="space-y-6 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-mono flex items-center gap-2">
+          <h2 className="text-2xl font-bold font-mono flex items-center gap-2 text-foreground">
             <ClipboardCheck className="h-6 w-6 text-primary" /> 申請管理
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            {(currentUser?.role ?? 0) >= 1 ? "全申請を監視中" : "申請履歴"}
+            {isAdmin ? "全申請を監視中" : "申請履歴"}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -224,12 +379,12 @@ const RequestsPage = () => {
               placeholder="検索..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border text-sm focus:ring-1 ring-primary w-full sm:w-64"
+              className="pl-9 pr-4 py-2 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all"
             />
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold shadow-sm"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-black text-sm font-bold shadow-sm active:scale-95 transition-all"
           >
             {showForm ? (
               <X className="h-4 w-4" />
@@ -244,12 +399,12 @@ const RequestsPage = () => {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="p-6 rounded-xl bg-card border shadow-md space-y-5 animate-in fade-in slide-in-from-top-4"
+          className="p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4"
         >
-          <h3 className="font-bold flex items-center gap-2">
-            <Plus className="h-4 w-4 text-primary" /> 出庫申請作成
+          <h3 className="font-bold flex items-center gap-2 text-foreground">
+            <Plus className="h-4 w-4 text-primary" /> 新規申請作成
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 対象物品
@@ -257,13 +412,29 @@ const RequestsPage = () => {
               <select
                 value={selectedItemId}
                 onChange={(e) => setSelectedItemId(Number(e.target.value))}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border text-sm focus:ring-1 ring-primary outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
               >
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.item_name} (在庫: {item.stock_quantity})
                   </option>
                 ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold uppercase opacity-50">
+                申請種別
+              </label>
+              <select
+                value={requestType}
+                onChange={(e) =>
+                  setRequestType(e.target.value as Request["request_type"])
+                }
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none font-bold"
+              >
+                <option value="checkout">貸出 (後で返却する)</option>
+                <option value="consume">消費 (使い切った・返却しない)</option>
+                <option value="dispose">廃棄・紛失 (破損などによる減少)</option>
               </select>
             </div>
             <div className="space-y-2">
@@ -276,27 +447,30 @@ const RequestsPage = () => {
                 value={quantity || ""}
                 onChange={(e) => setQuantity(Number(e.target.value))}
                 onFocus={(e) => e.target.select()}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border text-sm focus:ring-1 ring-primary outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
                 required
               />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="space-y-2">
               <label className="text-[11px] font-bold uppercase opacity-50">
-                備考
+                備考・理由
               </label>
               <input
                 type="text"
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border text-sm focus:ring-1 ring-primary outline-none"
-                placeholder="用途"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                placeholder={
+                  requestType === "dispose" ? "破損理由など" : "用途"
+                }
+                required={requestType === "dispose"}
               />
             </div>
           </div>
           <button
             type="submit"
             disabled={submitting || items.length === 0}
-            className="w-full sm:w-auto px-8 py-2.5 rounded-lg bg-primary text-black text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full sm:w-auto px-8 py-2.5 rounded-lg bg-primary text-black text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 mt-4 hover:opacity-90 transition-opacity"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -307,117 +481,65 @@ const RequestsPage = () => {
         </form>
       )}
 
-      <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left min-w-[850px]">
-            <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
-              <tr>
-                <th
-                  onClick={() => handleSort("id")}
-                  className="px-4 py-4 w-20 cursor-pointer"
-                >
-                  ID {getSortIcon("id")}
-                </th>
-                <th
-                  onClick={() => handleSort("item_name")}
-                  className="px-4 py-4 cursor-pointer"
-                >
-                  物品 {getSortIcon("item_name")}
-                </th>
-                <th
-                  onClick={() => handleSort("user_name")}
-                  className="px-4 py-4 cursor-pointer"
-                >
-                  申請者 {getSortIcon("user_name")}
-                </th>
-                <th
-                  onClick={() => handleSort("request_quantity")}
-                  className="px-4 py-4 text-right cursor-pointer"
-                >
-                  数量 {getSortIcon("request_quantity")}
-                </th>
-                <th className="px-4 py-4">備考</th>
-                <th
-                  onClick={() => handleSort("status")}
-                  className="px-4 py-4 text-center cursor-pointer"
-                >
-                  状態 {getSortIcon("status")}
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="text-center py-20 font-mono opacity-50 animate-pulse"
-                  >
-                    SYNCING...
-                  </td>
-                </tr>
-              ) : filteredAndSortedRequests.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="text-center py-20 text-muted-foreground italic"
-                  >
-                    申請なし
-                  </td>
-                </tr>
-              ) : (
-                filteredAndSortedRequests.map((req) => {
-                  const item = items.find((i) => i.id === req.item_id);
-                  const user = users.find(
-                    (u) => String(u.id) === String(req.user_id),
-                  );
-                  return (
-                    <tr
-                      key={req.id}
-                      className="hover:bg-secondary/30 transition-colors"
-                    >
-                      <td className="px-4 py-4 font-mono text-xs opacity-50">
-                        #{req.id}
-                      </td>
-                      <td className="px-4 py-4 font-bold">
-                        {item?.item_name || "不明"}
-                      </td>
-                      <td className="px-4 py-4 text-xs">
-                        <div className="flex items-center gap-1">
-                          <UserIcon className="h-3 w-3" />
-                          {user?.user_name || "退会"}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-right font-mono font-black">
-                        {req.request_quantity}
-                      </td>
-                      <td className="px-4 py-4 text-xs italic">
-                        {req.memo || "-"}
-                      </td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="flex flex-col items-center gap-2">
-                          <span
-                            className={`px-3 py-1 rounded border text-[10px] font-black uppercase ${statusStyle[req.status]}`}
-                          >
-                            {statusLabel[req.status]}
-                          </span>
-                          {req.status === "approved" && (
-                            <button
-                              onClick={() => handleReturn(req)}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold"
-                            >
-                              <RotateCcw className="h-3 w-3" /> 返却
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {loading ? (
+        <div className="text-center py-20 font-mono opacity-50 animate-pulse">
+          SYNCING DATA...
         </div>
-      </div>
+      ) : (
+        <div className="space-y-4">
+          {/* 未処理のアコーディオン */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            <button
+              onClick={() => setIsPendingOpen(!isPendingOpen)}
+              className="w-full flex items-center justify-between p-4 bg-primary/5 hover:bg-primary/10 transition-colors"
+            >
+              <div className="flex items-center gap-2 font-bold text-primary">
+                <AlertCircle className="h-5 w-5" />
+                要対応: 未処理の申請
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-primary text-black text-[10px] font-black">
+                  {pendingRequests.length}
+                </span>
+              </div>
+              {isPendingOpen ? (
+                <ChevronDown className="h-5 w-5 text-primary opacity-50" />
+              ) : (
+                <ChevronRight className="h-5 w-5 text-primary opacity-50" />
+              )}
+            </button>
+            {isPendingOpen && (
+              <div className="border-t border-border">
+                {renderRequestTable(pendingRequests)}
+              </div>
+            )}
+          </div>
+
+          {/* 処理済みの履歴アコーディオン */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            <button
+              onClick={() => setIsProcessedOpen(!isProcessedOpen)}
+              className="w-full flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors"
+            >
+              <div className="flex items-center gap-2 font-bold text-muted-foreground">
+                <Archive className="h-5 w-5" />
+                過去の履歴 (処理済み・却下・返却)
+                <span className="ml-2 px-2 py-0.5 rounded-full bg-secondary border text-[10px] font-black">
+                  {processedRequests.length}
+                </span>
+              </div>
+              {isProcessedOpen ? (
+                <ChevronDown className="h-5 w-5 text-muted-foreground opacity-50" />
+              ) : (
+                <ChevronRight className="h-5 w-5 text-muted-foreground opacity-50" />
+              )}
+            </button>
+            {isProcessedOpen && (
+              <div className="border-t border-border">
+                {renderRequestTable(processedRequests)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
