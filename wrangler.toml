@@ -1,3 +1,7 @@
 name = "storage-sparkle-suite"
 compatibility_date = "2024-04-02"
 pages_build_output_dir = "dist"
+
+[vars]
+INVENTORY_WEBHOOK_URL=https://discord.com/api/webhooks/1489647679419187260/xeek1RpDUGyeDeFPU1a-1hoJ0_sPY_6CeakFXyDKzrH6nJvReSJQVTdcFuTH1peQvlwl
+REQUEST_WEBHOOK_URL=https://discord.com/api/webhooks/1489650883288629541/yV5UbvjFMPoChTiINGmTs3a0avk7-Qol60_nq_Ucis3Wqfvu872LPueOLCldyoOsaiT1
