@@ -11,16 +11,22 @@ import ItemsPage from "@/pages/ItemsPage";
 import RequestsPage from "@/pages/RequestsPage";
 import AdminPage from "@/pages/AdminPage";
 import NotFound from "./pages/NotFound.tsx";
-import { useEffect } from 'react'
-import { supabase } from './lib/supabase'
+import { useEffect } from "react";
+import { supabase } from "./lib/supabase.ts";
 
 const queryClient = new QueryClient();
 
-
-const ProtectedRoute = ({ children, adminOnly = false }: { children: React.ReactNode; adminOnly?: boolean }) => {
+const ProtectedRoute = ({
+  children,
+  adminOnly = false,
+}: {
+  children: React.ReactNode;
+  adminOnly?: boolean;
+}) => {
   const { currentUser } = useAuth();
   if (!currentUser) return <Navigate to="/" replace />;
-  if (adminOnly && currentUser.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  if (adminOnly && currentUser.role !== "admin")
+    return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
 };
 
@@ -31,8 +37,6 @@ const LoginRoute = () => {
 };
 
 const App = () => {
-  
-
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -42,17 +46,45 @@ const App = () => {
           <AuthProvider>
             <Routes>
               <Route path="/" element={<LoginRoute />} />
-              <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-              <Route path="/items" element={<ProtectedRoute><ItemsPage /></ProtectedRoute>} />
-              <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
-              <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+              <Route
+                path="/dashboard"
+                element={
+                  <ProtectedRoute>
+                    <DashboardPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/items"
+                element={
+                  <ProtectedRoute>
+                    <ItemsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/requests"
+                element={
+                  <ProtectedRoute>
+                    <RequestsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <ProtectedRoute adminOnly>
+                    <AdminPage />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>
-  )
-}
+  );
+};
 
 export default App;
