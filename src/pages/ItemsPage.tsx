@@ -188,7 +188,6 @@ const ItemsPage = () => {
               type="number"
               required
               min="0"
-              /* 「012」問題を解消：値が0のときは空文字にして、入力時に0が残らないようにする */
               value={newItem.stock_quantity === 0 ? "" : newItem.stock_quantity}
               onChange={(e) =>
                 setNewItem({
@@ -197,7 +196,6 @@ const ItemsPage = () => {
                     e.target.value === "" ? 0 : Number(e.target.value),
                 })
               }
-              /* フォーカス時に中身を全選択させて上書きしやすくする */
               onFocus={(e) => e.target.select()}
               className="w-full bg-secondary/50 border-none rounded-md px-3 py-2 text-sm focus:ring-1 ring-primary outline-none transition-all"
             />
@@ -269,9 +267,11 @@ const ItemsPage = () => {
                       <span className="text-sm font-bold text-foreground">
                         {item.item_name}
                       </span>
-                      {/* 各物品の総在庫を小さく表示 */}
-                      <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border/50 font-mono">
-                        計: {item.total_stock}
+                      {/* 計の横に場所数を追加表示 */}
+                      <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border/50 font-mono flex items-center gap-1">
+                        計: {item.total_stock}{" "}
+                        <span className="opacity-50">|</span>{" "}
+                        <span>{item.locations.length}箇所</span>
                       </span>
                     </div>
                   </div>
