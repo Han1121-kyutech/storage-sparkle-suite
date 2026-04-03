@@ -34,42 +34,22 @@ const AdminPage = () => {
   const [users, setUsers] = useState<User[]>([]); // ユーザー情報を格納するステートを追加
   const [loading, setLoading] = useState(true);
 
-  // --- 物品データの取得 ---
-  const fetchItems = async () => {
+  // --- 全データの一括取得・更新 (即時反映用に追加) ---
+  const reloadAll = async () => {
     try {
-      const { data, error } = await supabase
-        .from("items")
-        .select("*")
-        .order("id", { ascending: true });
-      if (error) throw error;
-      setItems(data || []);
+      const [itemRes, reqRes, userRes] = await Promise.all([
+        supabase.from("items").select("*").order("id", { ascending: true }),
+        supabase
+          .from("requests")
+          .select("*")
+          .order("created_at", { ascending: false }),
+        supabase.from("users").select("*"),
+      ]);
+      setItems(itemRes.data || []);
+      setRequests(reqRes.data || []);
+      setUsers(userRes.data || []);
     } catch (error: any) {
-      toast.error("物品データ取得失敗: " + error.message);
-    }
-  };
-
-  // --- 申請データの取得 ---
-  const fetchRequests = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("requests")
-        .select("*")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setRequests(data || []);
-    } catch (error: any) {
-      console.error("Requests fetch error:", error);
-    }
-  };
-
-  // --- ユーザーデータの取得 ---
-  const fetchUsers = async () => {
-    try {
-      const { data, error } = await supabase.from("users").select("*");
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (error: any) {
-      console.error("Users fetch error:", error);
+      toast.error("データ同期失敗: " + error.message);
     }
   };
 
@@ -77,7 +57,7 @@ const AdminPage = () => {
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      await Promise.all([fetchItems(), fetchRequests(), fetchUsers()]);
+      await reloadAll();
       setLoading(false);
     };
     init();
@@ -88,23 +68,47 @@ const AdminPage = () => {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
 
-  // --- 申請の承認・却下処理 ---
+  // --- 申請の承認・却下処理 (在庫連動ロジックを追加) --- [cite: 2026-04-03]
   const updateRequestStatus = async (id: number, status: Request["status"]) => {
+    const targetRequest = requests.find((r) => r.id === id);
+    if (!targetRequest) return;
+
     try {
-      const { error } = await supabase
+      // 承認の場合のみ在庫を減らす
+      if (status === "approved") {
+        const item = items.find((i) => i.id === targetRequest.item_id);
+        if (!item || item.stock_quantity < targetRequest.request_quantity) {
+          toast.error("在庫不足のため承認不可");
+          return;
+        }
+
+        const { error: itemError } = await supabase
+          .from("items")
+          .update({
+            stock_quantity:
+              item.stock_quantity - targetRequest.request_quantity,
+          })
+          .eq("id", item.id);
+        if (itemError) throw itemError;
+      }
+
+      // ステータスを更新
+      const { error: reqError } = await supabase
         .from("requests")
         .update({ status: status })
         .eq("id", id);
-      if (error) throw error;
+      if (reqError) throw reqError;
+
       toast.success(`ステータスを ${statusLabel[status]} に更新しました`);
-      fetchRequests();
+      // 成功後、即座に画面全体（在庫数と申請リスト）を更新
+      await reloadAll();
     } catch (error: any) {
       toast.error("更新失敗: " + error.message);
     }
   };
 
   const handleSaveItem = () => {
-    fetchItems();
+    reloadAll(); // 保存後も即時反映
     setFormOpen(false);
     setEditingItem(null);
   };
@@ -118,7 +122,7 @@ const AdminPage = () => {
         .eq("id", deleteTarget.id);
       if (error) throw error;
       toast.success(`${deleteTarget.item_name} を削除しました`);
-      fetchItems();
+      reloadAll(); // 削除後も即時反映
     } catch (error: any) {
       toast.error("削除失敗: " + error.message);
     } finally {
@@ -247,8 +251,8 @@ const AdminPage = () => {
                 <tr>
                   <th className="px-4 py-4 w-20">申請ID</th>
                   <th className="px-4 py-4 w-24">状態</th>
-                  <th className="px-4 py-4">申請者</th> {/* ★追加 */}
-                  <th className="px-4 py-4">申請物品</th> {/* ★追加 */}
+                  <th className="px-4 py-4">申請者</th>
+                  <th className="px-4 py-4">申請物品</th>
                   <th className="px-4 py-4 text-right">数量</th>
                   <th className="px-4 py-4">メモ</th>
                   <th className="px-4 py-4 text-center">判定</th>
@@ -266,8 +270,8 @@ const AdminPage = () => {
                   </tr>
                 ) : (
                   requests.map((req) => {
-                    const item = items.find((i) => i.id === req.item_id); // 物品名を紐付け
-                    const user = users.find((u) => u.id === req.user_id); // ユーザー名を紐付け
+                    const item = items.find((i) => i.id === req.item_id);
+                    const user = users.find((u) => u.id === req.user_id);
                     return (
                       <tr
                         key={req.id}

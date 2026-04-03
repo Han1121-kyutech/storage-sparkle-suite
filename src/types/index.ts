@@ -16,7 +16,9 @@ export interface Item {
 export interface Request {
   id: number;
   item_id: number;
-  user_id: string; // User.id と紐づく
+  user_id: string;
   request_quantity: number;
   status: "pending" | "approved" | "rejected";
+  memo?: string; // ← 申請時のメモを追加
+  created_at?: string; // ← 作成日時を追加
 }
