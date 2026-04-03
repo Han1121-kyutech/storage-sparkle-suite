@@ -1,6 +1,4 @@
 import { useState, useEffect, useMemo } from "react";
-import { downloadAsCSV } from "@/utils/exportUtils";
-import { FileDown /* 既存のアイコン... */ } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { Request, Item, User } from "@/types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,12 +18,15 @@ import {
   ChevronDown,
   ChevronRight,
   MapPin,
-  Search, // 追加
+  Search,
+  FileDown,
 } from "lucide-react";
 import ItemFormModal from "@/components/ItemFormModal";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
+import { downloadAsCSV } from "@/utils/exportUtils";
 import { toast } from "sonner";
 
+// --- これらが消えていたからエラーになっていた ---
 const statusLabel: Record<Request["status"], string> = {
   pending: "未承認",
   approved: "承認済",
@@ -50,6 +51,7 @@ type GroupedAdminItem = {
   locations: Item[];
   total_stock: number;
 };
+// ------------------------------------------------
 
 const AdminPage = () => {
   const { currentUser } = useAuth();
@@ -60,7 +62,6 @@ const AdminPage = () => {
   const [loading, setLoading] = useState(true);
   const [expandedNames, setExpandedNames] = useState<Set<string>>(new Set());
 
-  // 検索用の状態追加
   const [itemSearch, setItemSearch] = useState("");
   const [requestSearch, setRequestSearch] = useState("");
 
@@ -100,9 +101,7 @@ const AdminPage = () => {
     init();
   }, []);
 
-  // --- 物品データの検索・グループ化・並び替え ---
   const groupedItems = useMemo(() => {
-    // まず検索フィルターを適用
     const filtered = items.filter(
       (item) =>
         item.item_name.toLowerCase().includes(itemSearch.toLowerCase()) ||
@@ -139,9 +138,7 @@ const AdminPage = () => {
     return result;
   }, [items, itemSort, itemSearch]);
 
-  // --- 申請データの検索・並び替え ---
   const sortedRequests = useMemo(() => {
-    // 申請者名または物品名でフィルタリング
     const filtered = requests.filter((req) => {
       const applicant =
         users.find((u) => u.id === req.user_id)?.user_name ?? "";
@@ -208,7 +205,6 @@ const AdminPage = () => {
     });
   };
 
-  // --- 既存ロジック ---
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
@@ -265,14 +261,12 @@ const AdminPage = () => {
         <p className="text-muted-foreground text-sm mt-1">物品管理と申請承認</p>
       </div>
 
-      {/* 物品管理セクション */}
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
             <Package className="h-5 w-5 opacity-70" /> 物品データベース
           </h3>
           <div className="flex items-center gap-3">
-            {/* 検索窓追加 */}
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
@@ -283,6 +277,14 @@ const AdminPage = () => {
                 className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border border-border text-sm focus:outline-none focus:ring-1 ring-primary w-full md:w-64 transition-all"
               />
             </div>
+
+            <button
+              onClick={() => downloadAsCSV(items, "物品在庫リスト")}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground text-sm font-bold hover:bg-secondary/80 transition-all shadow-sm active:scale-95"
+            >
+              <FileDown className="h-4 w-4" />
+              <span className="hidden sm:inline">CSV出力</span>
+            </button>
 
             <button
               onClick={() => {
@@ -296,7 +298,6 @@ const AdminPage = () => {
           </div>
         </div>
 
-        {/* 物品テーブルヘッダー（ソート用） */}
         <div className="bg-secondary/30 rounded-t-xl border-x border-t border-border flex items-center text-[11px] font-bold uppercase text-muted-foreground px-4 py-3">
           <div className="flex-1 flex items-center gap-4">
             <div
@@ -420,11 +421,9 @@ const AdminPage = () => {
         </div>
       </section>
 
-      {/* 申請管理セクション */}
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h3 className="text-lg font-bold text-foreground">物品出庫申請</h3>
-          {/* 検索窓追加 */}
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
@@ -436,7 +435,6 @@ const AdminPage = () => {
             />
           </div>
         </div>
-
         <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left min-w-[900px]">
