@@ -1,7 +1,8 @@
 export interface User {
-  id: string; // UUID
+  id: string;
   user_name: string;
-  role: 0 | 1 | 2; // "admin" | "general" から変更: 0=一般, 1=管理者, 2=最高管理者
+  role: 0 | 1 | 2;
+  password?: string;
 }
 
 export interface Item {

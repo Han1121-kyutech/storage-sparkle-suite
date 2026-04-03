@@ -11,7 +11,7 @@ import { supabase } from "@/lib/supabase";
 type AuthContextType = {
   currentUser: User | null;
   isLoading: boolean;
-  login: (user_name: string) => Promise<void>;
+  login: (user_name: string, password?: string) => Promise<void>; // 引数にpasswordを追加
   register: (user_name: string) => Promise<void>;
   logout: () => void;
 };
@@ -41,7 +41,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setIsLoading(false);
   }, []);
 
-  const login = async (user_name: string) => {
+  const login = async (user_name: string, password?: string) => {
     setIsLoading(true);
     try {
       const { data, error } = await supabase
@@ -53,6 +53,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) throw new Error("DB接続エラーが発生しました");
       if (!data) throw new Error("そのユーザー名は登録されていません");
 
+      // --- 管理者専用のパスワード検証ロジック ---
+      if (data.role >= 1) {
+        // パスワードがまだ送られてきていない場合はUI側に要求フラグを返す
+        if (!password) {
+          throw new Error("PASSWORD_REQUIRED");
+        }
+        // パスワードが送られてきたが、DBと一致しない場合
+        if (data.password !== password) {
+          throw new Error("パスワードが間違っています");
+        }
+      }
+
       setCurrentUser(data as User);
       localStorage.setItem("currentUser", JSON.stringify(data));
     } finally {
@@ -63,7 +75,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const register = async (user_name: string) => {
     setIsLoading(true);
     try {
-      // 1. 重複チェック
       const { data: exists } = await supabase
         .from("users")
         .select("user_name")
@@ -72,19 +83,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (exists) throw new Error("このユーザー名は既に使用されています");
 
-      // 2. 登録（IDはDB側で自動生成させるため送信しない、roleは数値の0）
       const { data, error } = await supabase
         .from("users")
         .insert([{ user_name, role: 0 }])
         .select()
         .single();
 
-      if (error) {
-        console.error("Supabase Insert Error:", error);
-        throw new Error(
-          `DBエラー: ${error.message} | 詳細: ${error.details || "なし"}`,
-        );
-      }
+      if (error) throw new Error("DBエラー: " + error.message);
 
       setCurrentUser(data as User);
       localStorage.setItem("currentUser", JSON.stringify(data));

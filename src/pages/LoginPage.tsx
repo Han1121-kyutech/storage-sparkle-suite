@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Warehouse, Loader2 } from "lucide-react";
+import { Warehouse, Loader2, Lock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Card,
@@ -18,10 +18,12 @@ import { toast } from "sonner";
 const LoginPage = () => {
   const { login, register, isLoading, currentUser } = useAuth();
   const navigate = useNavigate();
+
   const [userName, setUserName] = useState("");
+  const [password, setPassword] = useState(""); // パスワード状態
+  const [requirePassword, setRequirePassword] = useState(false); // パスワード入力欄の表示フラグ
   const [error, setError] = useState<string | null>(null);
 
-  // 既にログインしている場合はダッシュボードへ遷移
   useEffect(() => {
     if (currentUser) {
       navigate("/dashboard");
@@ -31,16 +33,33 @@ const LoginPage = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
     if (!userName.trim()) {
       setError("ユーザー名を入力してください");
       return;
     }
+
+    // パスワード入力モードに入っているのに空欄の場合は弾く
+    if (requirePassword && !password.trim()) {
+      setError("パスワードを入力してください");
+      return;
+    }
+
     try {
-      await login(userName.trim());
+      // requirePasswordがtrueの時だけパスワードを渡す
+      await login(
+        userName.trim(),
+        requirePassword ? password.trim() : undefined,
+      );
       toast.success("ログインしました");
       navigate("/dashboard");
     } catch (err: any) {
-      setError(err.message);
+      if (err.message === "PASSWORD_REQUIRED") {
+        // 管理者アカウントであることが判明した場合、エラーを出さずにパスワード欄を表示
+        setRequirePassword(true);
+      } else {
+        setError(err.message);
+      }
     }
   };
 
@@ -60,6 +79,14 @@ const LoginPage = () => {
     }
   };
 
+  // タブ切り替え時に状態をリセットする
+  const resetForm = () => {
+    setError(null);
+    setUserName("");
+    setPassword("");
+    setRequirePassword(false);
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4 antialiased">
       <div className="w-full max-w-md space-y-8 animate-in fade-in zoom-in duration-500">
@@ -74,16 +101,8 @@ const LoginPage = () => {
           </h1>
         </div>
 
-        <Tabs
-          defaultValue="login"
-          className="w-full"
-          onValueChange={() => {
-            setError(null);
-            setUserName("");
-          }}
-        >
+        <Tabs defaultValue="login" className="w-full" onValueChange={resetForm}>
           <TabsList className="grid w-full grid-cols-2">
-            {/* 処理中のタブ切り替えを防止 */}
             <TabsTrigger value="login" disabled={isLoading}>
               ログイン
             </TabsTrigger>
@@ -100,7 +119,9 @@ const LoginPage = () => {
               <CardHeader>
                 <CardTitle>ログイン</CardTitle>
                 <CardDescription>
-                  登録済みのユーザー名を入力してください
+                  {requirePassword
+                    ? "管理者アカウントです。パスワードを入力してください"
+                    : "登録済みのユーザー名を入力してください"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -111,17 +132,45 @@ const LoginPage = () => {
                       id="login-username"
                       placeholder="ユーザー名を入力..."
                       value={userName}
-                      onChange={(e) => setUserName(e.target.value)}
-                      disabled={isLoading} // 処理中の入力改ざんを防止
+                      onChange={(e) => {
+                        setUserName(e.target.value);
+                        setRequirePassword(false); // 名前を変えたらパスワード欄は一旦隠す
+                        setPassword("");
+                      }}
+                      disabled={isLoading || requirePassword} // パスワード入力中は名前を変えられないようにロック
                       autoComplete="off"
                       className="transition-all focus:ring-2 ring-primary/50"
                     />
                   </div>
+
+                  {/* 管理者と判定された場合のみスライドインで出現 */}
+                  {requirePassword && (
+                    <div className="space-y-2 animate-in slide-in-from-top-2 fade-in duration-300">
+                      <Label
+                        htmlFor="login-password"
+                        className="flex items-center gap-1 text-primary"
+                      >
+                        <Lock className="h-3 w-3" /> パスワード
+                      </Label>
+                      <Input
+                        id="login-password"
+                        type="password"
+                        placeholder="パスワードを入力..."
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={isLoading}
+                        className="transition-all focus:ring-2 ring-primary border-primary/50"
+                        autoFocus
+                      />
+                    </div>
+                  )}
+
                   {error && (
                     <p className="text-sm font-bold text-destructive animate-bounce">
                       {error}
                     </p>
                   )}
+
                   <Button
                     className="w-full font-bold"
                     type="submit"
@@ -132,6 +181,8 @@ const LoginPage = () => {
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         認証中...
                       </>
+                    ) : requirePassword ? (
+                      "パスワードを送信してログイン"
                     ) : (
                       "ログインする"
                     )}
@@ -161,7 +212,7 @@ const LoginPage = () => {
                       placeholder="ユーザー名を入力..."
                       value={userName}
                       onChange={(e) => setUserName(e.target.value)}
-                      disabled={isLoading} // 処理中の入力改ざんを防止
+                      disabled={isLoading}
                       autoComplete="off"
                       className="transition-all focus:ring-2 ring-primary/50"
                     />
