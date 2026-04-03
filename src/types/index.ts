@@ -1,7 +1,8 @@
+// src/types/index.ts
 export interface User {
-  id: string | number; // 過去のstring型と現在のnumber型の両方の互換性を担保
+  id: string | number;
   user_name: string;
-  role: 0 | 1 | 2; // あなたが残したかった厳密な権限制約
+  role: 0 | 1 | 2;
   password?: string;
   is_active?: boolean;
 }
@@ -13,18 +14,19 @@ export interface Item {
   location_no: string;
   stock_quantity: number;
   memo?: string;
-  label_no?: string; // 新規追加
-  specifications?: string; // 新規追加
+  label_no?: string;
+  specifications?: string;
   created_at?: string;
 }
 
 export interface Request {
   id: number;
   item_id: number;
-  user_id: string | number; // Userのid型に合わせる
-  request_type?: "checkout" | "consume" | "dispose"; // 新規追加（貸出・消費・廃棄）
+  user_id: string | number;
+  request_type: "checkout" | "consume" | "dispose";
   request_quantity: number;
-  status: "pending" | "approved" | "rejected" | "returned"; // 厳密な状態管理
+  status: "pending" | "approved" | "rejected" | "returned";
   memo?: string;
+  scheduled_date?: string; // 予約機能のために追加
   created_at?: string;
 }

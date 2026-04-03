@@ -17,6 +17,7 @@ import {
   Archive,
   AlertCircle,
   FileText,
+  CalendarDays,
 } from "lucide-react";
 import { toast } from "sonner";
 import { sendRequestNotification } from "@/utils/notificationUtils";
@@ -73,6 +74,7 @@ const RequestsPage = () => {
   const [selectedItemId, setSelectedItemId] = useState<number>(0);
   const [requestType, setRequestType] =
     useState<Request["request_type"]>("checkout");
+  const [scheduledDate, setScheduledDate] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [memo, setMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -176,26 +178,37 @@ const RequestsPage = () => {
 
     setSubmitting(true);
     try {
+      // メモの自動構成ロジック
+      let finalMemo = memo.trim();
+      if (scheduledDate) {
+        const [y, m, d] = scheduledDate.split("-");
+        const dateStr = `${y}年${m}月${d}日`;
+        // 既存のメモがある場合は区切り文字を追加して結合
+        finalMemo = `【予約】使用予定日：${dateStr}${finalMemo ? ` / ${finalMemo}` : ""}`;
+      }
+
       const { error } = await supabase.from("requests").insert([
         {
           item_id: selectedItemId,
           user_id: currentUser.id,
           request_type: requestType,
           request_quantity: quantity,
-          memo: memo.trim(),
+          memo: finalMemo,
           status: "pending",
+          scheduled_date: scheduledDate || null,
         },
       ]);
       if (error) throw error;
 
       await sendRequestNotification(
-        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name}\n数量: ${quantity}\n備考: ${memo || "なし"}`,
+        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name}\n数量: ${quantity}\n使用予定日: ${scheduledDate || "即時"}\n備考: ${finalMemo || "なし"}`,
       );
 
       toast.success("申請完了");
       setShowForm(false);
       setQuantity(1);
       setMemo("");
+      setScheduledDate("");
       setRequestType("checkout");
       fetchData();
     } catch (error: any) {
@@ -244,7 +257,7 @@ const RequestsPage = () => {
     <div>
       {/* PC用: テーブル表示 */}
       <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm text-left min-w-[900px]">
+        <table className="w-full text-sm text-left min-w-[1000px]">
           <thead className="bg-secondary/30 text-muted-foreground uppercase text-[11px] font-bold">
             <tr>
               <th
@@ -253,11 +266,12 @@ const RequestsPage = () => {
               >
                 ID {getSortIcon("id")}
               </th>
+              <th className="px-4 py-3 w-24">種別</th>
               <th
-                onClick={() => handleSort("request_type")}
-                className="px-4 py-3 w-24 cursor-pointer hover:text-foreground transition-colors"
+                onClick={() => handleSort("scheduled_date" as any)}
+                className="px-4 py-3 w-32 cursor-pointer hover:text-foreground transition-colors"
               >
-                種別 {getSortIcon("request_type")}
+                使用予定日 {getSortIcon("scheduled_date" as any)}
               </th>
               <th
                 onClick={() => handleSort("item_name")}
@@ -265,32 +279,17 @@ const RequestsPage = () => {
               >
                 物品 {getSortIcon("item_name")}
               </th>
-              <th
-                onClick={() => handleSort("user_name")}
-                className="px-4 py-3 cursor-pointer hover:text-foreground transition-colors"
-              >
-                申請者 {getSortIcon("user_name")}
-              </th>
-              <th
-                onClick={() => handleSort("request_quantity")}
-                className="px-4 py-3 text-right cursor-pointer hover:text-foreground transition-colors"
-              >
-                数量 {getSortIcon("request_quantity")}
-              </th>
+              <th className="px-4 py-3">申請者</th>
+              <th className="px-4 py-3 text-right">数量</th>
               <th className="px-4 py-3">備考</th>
-              <th
-                onClick={() => handleSort("status")}
-                className="px-4 py-3 text-center cursor-pointer hover:text-foreground transition-colors"
-              >
-                状態 {getSortIcon("status")}
-              </th>
+              <th className="px-4 py-3 text-center">状態</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border/50">
             {reqData.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="text-center py-10 text-muted-foreground italic"
                 >
                   該当するデータがありません
@@ -302,8 +301,6 @@ const RequestsPage = () => {
                 const user = users.find(
                   (u) => String(u.id) === String(req.user_id),
                 );
-                const rType = req.request_type || "checkout";
-
                 return (
                   <tr
                     key={req.id}
@@ -314,24 +311,34 @@ const RequestsPage = () => {
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`px-2 py-1 rounded border text-[10px] font-bold ${typeStyle[rType]}`}
+                        className={`px-2 py-1 rounded border text-[10px] font-bold ${typeStyle[req.request_type || "checkout"]}`}
                       >
-                        {typeLabel[rType]}
+                        {typeLabel[req.request_type || "checkout"]}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {req.scheduled_date ? (
+                        <div className="flex items-center gap-1.5 text-primary font-bold text-xs">
+                          <CalendarDays className="h-3.5 w-3.5" />{" "}
+                          {req.scheduled_date}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground text-[10px]">
+                          即時
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-bold text-foreground">
                       {item?.item_name || "不明"}
                     </td>
-                    <td className="px-4 py-3 text-xs">
-                      <div className="flex items-center gap-1 text-muted-foreground">
-                        <UserIcon className="h-3 w-3" />
-                        {user?.user_name || "退会"}
-                      </div>
+                    <td className="px-4 py-3 text-xs flex items-center gap-1">
+                      <UserIcon className="h-3 w-3 opacity-50" />{" "}
+                      {user?.user_name || "退会"}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-black text-foreground">
+                    <td className="px-4 py-3 text-right font-mono font-black">
                       {req.request_quantity}
                     </td>
-                    <td className="px-4 py-3 text-xs italic text-muted-foreground">
+                    <td className="px-4 py-3 text-xs italic opacity-70">
                       {req.memo || "-"}
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -341,14 +348,15 @@ const RequestsPage = () => {
                         >
                           {statusLabel[req.status]}
                         </span>
-                        {req.status === "approved" && rType === "checkout" && (
-                          <button
-                            onClick={() => handleReturn(req)}
-                            className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold active:scale-95 transition-all"
-                          >
-                            <RotateCcw className="h-3 w-3" /> 返却
-                          </button>
-                        )}
+                        {req.status === "approved" &&
+                          req.request_type === "checkout" && (
+                            <button
+                              onClick={() => handleReturn(req)}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold transition-all"
+                            >
+                              <RotateCcw className="h-3 w-3" /> 返却
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>
@@ -371,8 +379,6 @@ const RequestsPage = () => {
             const user = users.find(
               (u) => String(u.id) === String(req.user_id),
             );
-            const rType = req.request_type || "checkout";
-
             return (
               <div
                 key={req.id}
@@ -384,9 +390,9 @@ const RequestsPage = () => {
                       #{req.id}
                     </span>
                     <span
-                      className={`px-2 py-0.5 rounded border text-[10px] font-bold ${typeStyle[rType]}`}
+                      className={`px-2 py-0.5 rounded border text-[10px] font-bold ${typeStyle[req.request_type || "checkout"]}`}
                     >
-                      {typeLabel[rType]}
+                      {typeLabel[req.request_type || "checkout"]}
                     </span>
                   </div>
                   <span
@@ -395,15 +401,13 @@ const RequestsPage = () => {
                     {statusLabel[req.status]}
                   </span>
                 </div>
-
                 <div className="flex justify-between items-start gap-4">
-                  <div className="space-y-1">
+                  <div className="space-y-1 flex-1">
                     <div className="font-bold text-foreground text-sm line-clamp-1">
                       {item?.item_name || "不明"}
                     </div>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <UserIcon className="h-3 w-3" />
-                      {user?.user_name || "退会"}
+                      <UserIcon className="h-3 w-3" /> {user?.user_name}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -415,7 +419,12 @@ const RequestsPage = () => {
                     </div>
                   </div>
                 </div>
-
+                {req.scheduled_date && (
+                  <div className="flex items-center gap-2 p-2 bg-primary/5 rounded border border-primary/20 text-primary text-[11px] font-bold">
+                    <CalendarDays className="h-3.5 w-3.5" /> 予約日:{" "}
+                    {req.scheduled_date}
+                  </div>
+                )}
                 {req.memo && (
                   <div className="flex items-start gap-2 text-[11px] bg-secondary/30 p-2.5 rounded border border-border/50">
                     <FileText className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
@@ -424,17 +433,15 @@ const RequestsPage = () => {
                     </div>
                   </div>
                 )}
-
-                {req.status === "approved" && rType === "checkout" && (
-                  <div className="pt-2">
+                {req.status === "approved" &&
+                  req.request_type === "checkout" && (
                     <button
                       onClick={() => handleReturn(req)}
                       className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-info/10 text-info hover:bg-info hover:text-white border border-info/20 rounded-lg text-xs font-bold active:scale-[0.98] transition-all shadow-sm"
                     >
-                      <RotateCcw className="h-4 w-4" /> この物品を返却する
+                      <RotateCcw className="h-4 w-4" /> 返却手続きをする
                     </button>
-                  </div>
-                )}
+                  )}
               </div>
             );
           })
@@ -444,14 +451,14 @@ const RequestsPage = () => {
   );
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 pb-20 max-w-[1200px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold font-mono flex items-center gap-2 text-foreground">
+          <h2 className="text-2xl font-bold font-mono flex items-center gap-2 text-foreground tracking-tighter">
             <ClipboardCheck className="h-6 w-6 text-primary" /> 申請管理
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            {isAdmin ? "全申請を監視中" : "申請履歴"}
+            {isAdmin ? "全申請を監視中" : "あなたの申請と予約の履歴"}
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -459,7 +466,7 @@ const RequestsPage = () => {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="検索..."
+              placeholder="名前・物品・理由で検索..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all"
@@ -473,8 +480,8 @@ const RequestsPage = () => {
               <X className="h-4 w-4" />
             ) : (
               <Plus className="h-4 w-4" />
-            )}
-            {showForm ? "中止" : "新規申請"}
+            )}{" "}
+            {showForm ? "中止" : "新規申請・予約"}
           </button>
         </div>
       </div>
@@ -485,9 +492,9 @@ const RequestsPage = () => {
           className="p-5 sm:p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4"
         >
           <h3 className="font-bold flex items-center gap-2 text-foreground">
-            <Plus className="h-4 w-4 text-primary" /> 新規申請作成
+            <Plus className="h-4 w-4 text-primary" /> 新規申請・予約の作成
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 対象物品
@@ -515,10 +522,23 @@ const RequestsPage = () => {
                 }
                 className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none font-bold"
               >
-                <option value="checkout">貸出 (後で返却する)</option>
-                <option value="consume">消費 (使い切った・返却しない)</option>
-                <option value="dispose">廃棄・紛失 (破損などによる減少)</option>
+                <option value="checkout">貸出 / 予約</option>
+                <option value="consume">消費 (返却不要)</option>
+                <option value="dispose">廃棄 (破損等)</option>
               </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase opacity-50">
+                使用予定日 (任意/予約の場合)
+              </label>
+              <input
+                type="date"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                max="9999-12-31"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+              />
             </div>
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold uppercase opacity-50">
@@ -529,14 +549,13 @@ const RequestsPage = () => {
                 min={1}
                 value={quantity || ""}
                 onChange={(e) => setQuantity(Number(e.target.value))}
-                onFocus={(e) => e.target.select()}
                 className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
                 required
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 md:col-span-2 lg:col-span-2">
               <label className="text-[11px] font-bold uppercase opacity-50">
-                備考・理由
+                備考・用途
               </label>
               <input
                 type="text"
@@ -544,7 +563,9 @@ const RequestsPage = () => {
                 onChange={(e) => setMemo(e.target.value)}
                 className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
                 placeholder={
-                  requestType === "dispose" ? "破損理由など" : "用途"
+                  requestType === "dispose"
+                    ? "破損理由を入力"
+                    : "例: 実験で使用、イベント用"
                 }
                 required={requestType === "dispose"}
               />
@@ -553,12 +574,12 @@ const RequestsPage = () => {
           <button
             type="submit"
             disabled={submitting || items.length === 0}
-            className="w-full sm:w-auto px-8 py-3 sm:py-2.5 rounded-lg bg-primary text-black text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2 mt-2 hover:opacity-90 transition-opacity active:scale-[0.98] shadow-sm"
+            className="w-full sm:w-auto px-10 py-3 rounded-lg bg-primary text-black text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              "申請送信"
+              "申請を送信する"
             )}
           </button>
         </form>
@@ -576,16 +597,15 @@ const RequestsPage = () => {
               className="w-full flex items-center justify-between p-4 bg-primary/5 hover:bg-primary/10 transition-colors"
             >
               <div className="flex items-center gap-2 font-bold text-primary">
-                <AlertCircle className="h-5 w-5" />
-                要対応: 承認待ちの申請
+                <AlertCircle className="h-5 w-5" /> 承認待ち・予約中{" "}
                 <span className="ml-2 px-2 py-0.5 rounded-full bg-primary text-black text-[10px] font-black">
                   {pendingRequests.length}
                 </span>
               </div>
               {isPendingOpen ? (
-                <ChevronDown className="h-5 w-5 text-primary opacity-50" />
+                <ChevronDown className="h-5 w-5 opacity-50" />
               ) : (
-                <ChevronRight className="h-5 w-5 text-primary opacity-50" />
+                <ChevronRight className="h-5 w-5 opacity-50" />
               )}
             </button>
             {isPendingOpen && (
@@ -594,23 +614,21 @@ const RequestsPage = () => {
               </div>
             )}
           </div>
-
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             <button
               onClick={() => setIsProcessedOpen(!isProcessedOpen)}
               className="w-full flex items-center justify-between p-4 hover:bg-secondary/30 transition-colors"
             >
               <div className="flex items-center gap-2 font-bold text-muted-foreground">
-                <Archive className="h-5 w-5" />
-                過去の履歴 (処理済み・却下・返却)
+                <Archive className="h-5 w-5" /> 完了した履歴{" "}
                 <span className="ml-2 px-2 py-0.5 rounded-full bg-secondary border text-[10px] font-black">
                   {processedRequests.length}
                 </span>
               </div>
               {isProcessedOpen ? (
-                <ChevronDown className="h-5 w-5 text-muted-foreground opacity-50" />
+                <ChevronDown className="h-5 w-5 opacity-50" />
               ) : (
-                <ChevronRight className="h-5 w-5 text-muted-foreground opacity-50" />
+                <ChevronRight className="h-5 w-5 opacity-50" />
               )}
             </button>
             {isProcessedOpen && (
