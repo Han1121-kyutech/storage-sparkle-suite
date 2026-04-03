@@ -24,7 +24,7 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
     { to: "/requests", label: "申請一覧", icon: ClipboardList },
   ];
 
-  if (currentUser?.role === "admin") {
+  if ((currentUser?.role ?? 0) >= 1) {
     navItems.push({ to: "/admin", label: "管理", icon: Shield });
   }
 
@@ -118,7 +118,11 @@ const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 {currentUser?.user_name}
               </p>
               <p className="text-xs text-muted-foreground font-mono">
-                {currentUser?.role === "admin" ? "管理者" : "一般"}
+                {currentUser?.role === 2
+                  ? "最高管理者"
+                  : currentUser?.role === 1
+                    ? "管理者"
+                    : "一般"}
               </p>
             </div>
             <button

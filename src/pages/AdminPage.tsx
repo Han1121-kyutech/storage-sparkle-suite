@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { Request, Item, User } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   CheckCircle,
   XCircle,
@@ -33,6 +34,8 @@ const statusStyle: Record<Request["status"], string> = {
 };
 
 const AdminPage = () => {
+  const { currentUser } = useAuth();
+  const isSuperAdmin = (currentUser?.role ?? 0) >= 2;
   const [requests, setRequests] = useState<Request[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -322,7 +325,11 @@ const AdminPage = () => {
                           </div>
                         </td>
                         <td className="px-4 py-4">
-                          {req.status === "pending" ? (
+                          {!isSuperAdmin ? (
+                            <div className="text-center text-[10px] text-muted-foreground italic">
+                              閲覧のみ
+                            </div>
+                          ) : req.status === "pending" ? (
                             <div className="flex items-center justify-center gap-2">
                               <button
                                 onClick={() =>
@@ -338,7 +345,7 @@ const AdminPage = () => {
                                 }
                                 className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-destructive text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
                               >
-                                <XCircle className="h-3 w-3" /> 却却
+                                <XCircle className="h-3 w-3" /> 却下
                               </button>
                             </div>
                           ) : req.status === "approved" ? (

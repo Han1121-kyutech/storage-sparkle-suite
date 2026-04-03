@@ -18,15 +18,14 @@ const queryClient = new QueryClient();
 
 const ProtectedRoute = ({
   children,
-  adminOnly = false,
+  minRole = 0,
 }: {
   children: React.ReactNode;
-  adminOnly?: boolean;
+  minRole?: number;
 }) => {
   const { currentUser } = useAuth();
   if (!currentUser) return <Navigate to="/" replace />;
-  if (adminOnly && currentUser.role !== "admin")
-    return <Navigate to="/dashboard" replace />;
+  if (currentUser.role < minRole) return <Navigate to="/dashboard" replace />;
   return <AppLayout>{children}</AppLayout>;
 };
 
@@ -73,7 +72,7 @@ const App = () => {
               <Route
                 path="/admin"
                 element={
-                  <ProtectedRoute adminOnly>
+                  <ProtectedRoute minRole={1}>
                     <AdminPage />
                   </ProtectedRoute>
                 }
