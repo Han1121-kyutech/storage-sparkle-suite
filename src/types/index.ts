@@ -1,7 +1,7 @@
 export interface User {
   id: string; // UUID
   user_name: string;
-  role: 'admin' | 'general';
+  role: "admin" | "general";
 }
 
 export interface Item {
@@ -10,6 +10,7 @@ export interface Item {
   location_name: string;
   location_no: string;
   stock_quantity: number;
+  memo?: string; // 備考・用途カラムを追加
 }
 
 export interface Request {
@@ -17,5 +18,5 @@ export interface Request {
   item_id: number;
   user_id: string; // User.id と紐づく
   request_quantity: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: "pending" | "approved" | "rejected";
 }
