@@ -173,17 +173,33 @@ const RequestsPage = () => {
     if (!currentUser) return;
     const targetItem = items.find((i) => i.id === selectedItemId);
 
-    if (targetItem && quantity > targetItem.stock_quantity)
-      return toast.error(`在庫不足（最大: ${targetItem.stock_quantity}）`);
+    // 有効在庫（Effective Stock）のチェックを追加
+    if (targetItem) {
+      const reservedSum = requests
+        .filter(
+          (r) =>
+            r.item_id === targetItem.id &&
+            (r.status === "approved" || r.status === "pending"),
+        )
+        .reduce((sum, r) => sum + r.request_quantity, 0);
+      const effectiveStock = Math.max(
+        0,
+        targetItem.stock_quantity - reservedSum,
+      );
+
+      if (quantity > effectiveStock) {
+        return toast.error(
+          `申請失敗: 他の予約を含めた有効在庫は残り ${effectiveStock} です。`,
+        );
+      }
+    }
 
     setSubmitting(true);
     try {
-      // メモの自動構成ロジック
       let finalMemo = memo.trim();
       if (scheduledDate) {
         const [y, m, d] = scheduledDate.split("-");
         const dateStr = `${y}年${m}月${d}日`;
-        // 既存のメモがある場合は区切り文字を追加して結合
         finalMemo = `【予約】使用予定日：${dateStr}${finalMemo ? ` / ${finalMemo}` : ""}`;
       }
 
@@ -255,7 +271,6 @@ const RequestsPage = () => {
 
   const renderRequestTable = (reqData: Request[]) => (
     <div>
-      {/* PC用: テーブル表示 */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm text-left min-w-[1000px]">
           <thead className="bg-secondary/30 text-muted-foreground uppercase text-[11px] font-bold">
@@ -367,7 +382,6 @@ const RequestsPage = () => {
         </table>
       </div>
 
-      {/* スマホ用: カード表示 */}
       <div className="md:hidden divide-y divide-border/50">
         {reqData.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground italic text-sm">
@@ -529,7 +543,7 @@ const RequestsPage = () => {
             </div>
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold uppercase opacity-50">
-                使用予定日 (任意/予約の場合)
+                使用予定日
               </label>
               <input
                 type="date"
@@ -565,7 +579,7 @@ const RequestsPage = () => {
                 placeholder={
                   requestType === "dispose"
                     ? "破損理由を入力"
-                    : "例: 実験で使用、イベント用"
+                    : "例: 実験で使用"
                 }
                 required={requestType === "dispose"}
               />
