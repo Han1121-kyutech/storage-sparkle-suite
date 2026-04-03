@@ -24,9 +24,12 @@ import {
 import ItemFormModal from "@/components/ItemFormModal";
 import DeleteConfirmDialog from "@/components/DeleteConfirmDialog";
 import { downloadAsCSV } from "@/utils/exportUtils";
+import {
+  sendInventoryNotification,
+  sendRequestNotification,
+} from "@/utils/notificationUtils";
 import { toast } from "sonner";
 
-// --- これらが消えていたからエラーになっていた ---
 const statusLabel: Record<Request["status"], string> = {
   pending: "未承認",
   approved: "承認済",
@@ -51,20 +54,19 @@ type GroupedAdminItem = {
   locations: Item[];
   total_stock: number;
 };
-// ------------------------------------------------
 
 const AdminPage = () => {
   const { currentUser } = useAuth();
   const isSuperAdmin = (currentUser?.role ?? 0) >= 2;
+
   const [requests, setRequests] = useState<Request[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedNames, setExpandedNames] = useState<Set<string>>(new Set());
-
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
   const [requestSearch, setRequestSearch] = useState("");
-
   const [itemSort, setItemSort] = useState<SortConfig<Item>>({
     key: "item_name",
     direction: "asc",
@@ -73,6 +75,10 @@ const AdminPage = () => {
     key: "id",
     direction: "desc",
   });
+
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<Item | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
 
   const reloadAll = async () => {
     try {
@@ -88,162 +94,144 @@ const AdminPage = () => {
       setRequests(reqRes.data || []);
       setUsers(userRes.data || []);
     } catch (error: any) {
-      toast.error("データ同期失敗: " + error.message);
+      toast.error("同期失敗: " + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      await reloadAll();
-      setLoading(false);
-    };
-    init();
+    reloadAll();
   }, []);
+
+  const handleExport = (
+    sortKey: keyof Item,
+    direction: "asc" | "desc" = "asc",
+  ) => {
+    const sortedData = [...items].sort((a, b) => {
+      let aVal = a[sortKey] ?? "";
+      let bVal = b[sortKey] ?? "";
+      if (typeof aVal === "string") {
+        return direction === "asc"
+          ? aVal.localeCompare(bVal as string, "ja")
+          : (bVal as string).localeCompare(aVal, "ja");
+      }
+      return direction === "asc"
+        ? (aVal as number) - (bVal as number)
+        : (bVal as number) - (aVal as number);
+    });
+    downloadAsCSV(sortedData, `在庫リスト_${sortKey}`);
+    setIsExportModalOpen(false);
+    toast.success("CSV出力完了");
+  };
 
   const groupedItems = useMemo(() => {
     const filtered = items.filter(
-      (item) =>
-        item.item_name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-        item.location_name.toLowerCase().includes(itemSearch.toLowerCase()),
+      (i) =>
+        i.item_name.toLowerCase().includes(itemSearch.toLowerCase()) ||
+        i.location_name.toLowerCase().includes(itemSearch.toLowerCase()),
     );
-
     const groups: Record<string, GroupedAdminItem> = {};
-    filtered.forEach((item) => {
-      if (!groups[item.item_name]) {
-        groups[item.item_name] = {
-          item_name: item.item_name,
+    filtered.forEach((i) => {
+      if (!groups[i.item_name])
+        groups[i.item_name] = {
+          item_name: i.item_name,
           locations: [],
           total_stock: 0,
         };
-      }
-      groups[item.item_name].locations.push(item);
-      groups[item.item_name].total_stock += item.stock_quantity;
+      groups[i.item_name].locations.push(i);
+      groups[i.item_name].total_stock += i.stock_quantity;
     });
-
-    const result = Object.values(groups);
-
-    result.sort((a, b) => {
-      let aVal: any = a.item_name;
-      let bVal: any = b.item_name;
-      if (itemSort.key === "stock_quantity") {
-        aVal = a.total_stock;
-        bVal = b.total_stock;
-      }
-      if (aVal < bVal) return itemSort.direction === "asc" ? -1 : 1;
-      if (aVal > bVal) return itemSort.direction === "asc" ? 1 : -1;
-      return 0;
+    return Object.values(groups).sort((a, b) => {
+      let aV = itemSort.key === "stock_quantity" ? a.total_stock : a.item_name;
+      let bV = itemSort.key === "stock_quantity" ? b.total_stock : b.item_name;
+      return itemSort.direction === "asc"
+        ? aV < bV
+          ? -1
+          : 1
+        : aV > bV
+          ? -1
+          : 1;
     });
-
-    return result;
   }, [items, itemSort, itemSearch]);
 
   const sortedRequests = useMemo(() => {
-    const filtered = requests.filter((req) => {
-      const applicant =
-        users.find((u) => u.id === req.user_id)?.user_name ?? "";
-      const itemName = items.find((i) => i.id === req.item_id)?.item_name ?? "";
-      const searchLower = requestSearch.toLowerCase();
+    const filtered = requests.filter((r) => {
+      const u = users.find((u) => u.id === r.user_id)?.user_name ?? "";
+      const i = items.find((i) => i.id === r.item_id)?.item_name ?? "";
       return (
-        applicant.toLowerCase().includes(searchLower) ||
-        itemName.toLowerCase().includes(searchLower)
+        u.toLowerCase().includes(requestSearch.toLowerCase()) ||
+        i.toLowerCase().includes(requestSearch.toLowerCase())
       );
     });
-
-    const data = [...filtered];
-    data.sort((a, b) => {
-      let aVal: any;
-      let bVal: any;
-
+    return [...filtered].sort((a, b) => {
+      let aV: any, bV: any;
       if (requestSort.key === "user_name") {
-        aVal = users.find((u) => u.id === a.user_id)?.user_name ?? "";
-        bVal = users.find((u) => u.id === b.user_id)?.user_name ?? "";
+        aV = users.find((u) => u.id === a.user_id)?.user_name;
+        bV = users.find((u) => u.id === b.user_id)?.user_name;
       } else if (requestSort.key === "item_name") {
-        aVal = items.find((i) => i.id === a.item_id)?.item_name ?? "";
-        bVal = items.find((i) => i.id === b.item_id)?.item_name ?? "";
+        aV = items.find((i) => i.id === a.item_id)?.item_name;
+        bV = items.find((i) => i.id === b.item_id)?.item_name;
       } else {
-        aVal = a[requestSort.key as keyof Request] ?? "";
-        bVal = b[requestSort.key as keyof Request] ?? "";
+        aV = a[requestSort.key as keyof Request];
+        bV = b[requestSort.key as keyof Request];
       }
-
-      if (aVal < bVal) return requestSort.direction === "asc" ? -1 : 1;
-      if (aVal > bVal) return requestSort.direction === "asc" ? 1 : -1;
-      return 0;
+      return requestSort.direction === "asc"
+        ? aV < bV
+          ? -1
+          : 1
+        : aV > bV
+          ? -1
+          : 1;
     });
-    return data;
   }, [requests, requestSort, items, users, requestSearch]);
 
-  const requestSortItems = (key: string) => {
-    setItemSort((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
+  const updateStatus = async (id: number, s: Request["status"]) => {
+    const r = requests.find((req) => req.id === id);
+    if (!r) return;
+    try {
+      const i = items.find((item) => item.id === r.item_id);
+      if (!i) throw new Error("物品不明");
+      if (s === "approved" && i.stock_quantity < r.request_quantity)
+        return toast.error("在庫不足");
+      if (s === "approved")
+        await supabase
+          .from("items")
+          .update({ stock_quantity: i.stock_quantity - r.request_quantity })
+          .eq("id", i.id);
+      else if (s === "returned")
+        await supabase
+          .from("items")
+          .update({ stock_quantity: i.stock_quantity + r.request_quantity })
+          .eq("id", i.id);
+      await supabase.from("requests").update({ status: s }).eq("id", id);
+
+      const statusText =
+        s === "approved"
+          ? "✅ 承認"
+          : s === "rejected"
+            ? "❌ 却下"
+            : "🔄 返却完了";
+
+      await sendRequestNotification(
+        `📢 **ステータス更新**\n対象者: ${users.find((u) => u.id === r.user_id)?.user_name}\n物品: ${i.item_name}\n結果: ${statusText}`,
+      );
+
+      toast.success("更新完了");
+      reloadAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
   };
 
-  const requestSortRequests = (key: string) => {
-    setRequestSort((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }));
-  };
-
-  const getSortIcon = (currentKey: string, config: SortConfig<any>) => {
-    if (config.key !== currentKey)
-      return <ArrowUpDown className="h-3 w-3 opacity-30" />;
-    return config.direction === "asc" ? (
+  const getSortIcon = (k: string, c: SortConfig<any>) =>
+    c.key !== k ? (
+      <ArrowUpDown className="h-3 w-3 opacity-30" />
+    ) : c.direction === "asc" ? (
       <ChevronUp className="h-3 w-3 text-primary" />
     ) : (
       <ChevronDown className="h-3 w-3 text-primary" />
     );
-  };
-
-  const toggleExpand = (name: string) => {
-    setExpandedNames((prev) => {
-      const next = new Set(prev);
-      next.has(name) ? next.delete(name) : next.add(name);
-      return next;
-    });
-  };
-
-  const [formOpen, setFormOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<Item | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
-
-  const updateRequestStatus = async (id: number, status: Request["status"]) => {
-    const targetRequest = requests.find((r) => r.id === id);
-    if (!targetRequest) return;
-    try {
-      const item = items.find((i) => i.id === targetRequest.item_id);
-      if (!item) throw new Error("物品が見つかりません");
-
-      if (status === "approved") {
-        if (item.stock_quantity < targetRequest.request_quantity) {
-          toast.error("在庫不足のため承認不可");
-          return;
-        }
-        await supabase
-          .from("items")
-          .update({
-            stock_quantity:
-              item.stock_quantity - targetRequest.request_quantity,
-          })
-          .eq("id", item.id);
-      } else if (status === "returned") {
-        await supabase
-          .from("items")
-          .update({
-            stock_quantity:
-              item.stock_quantity + targetRequest.request_quantity,
-          })
-          .eq("id", item.id);
-      }
-      await supabase.from("requests").update({ status }).eq("id", id);
-      toast.success(`ステータスを更新しました`);
-      reloadAll();
-    } catch (error: any) {
-      toast.error("更新失敗: " + error.message);
-    }
-  };
 
   if (loading)
     return (
@@ -254,16 +242,14 @@ const AdminPage = () => {
 
   return (
     <div className="space-y-10 pb-20 px-1 sm:px-4">
-      <div>
-        <h2 className="text-2xl font-bold font-mono text-foreground flex items-center gap-2 tracking-tighter">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold font-mono flex items-center gap-2">
           <ClipboardList className="h-6 w-6 text-primary" /> 管理者パネル
         </h2>
-        <p className="text-muted-foreground text-sm mt-1">物品管理と申請承認</p>
       </div>
-
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+          <h3 className="text-lg font-bold flex items-center gap-2">
             <Package className="h-5 w-5 opacity-70" /> 物品データベース
           </h3>
           <div className="flex items-center gap-3">
@@ -271,335 +257,414 @@ const AdminPage = () => {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="物品名・場所で検索..."
+                placeholder="検索..."
                 value={itemSearch}
                 onChange={(e) => setItemSearch(e.target.value)}
-                className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border border-border text-sm focus:outline-none focus:ring-1 ring-primary w-full md:w-64 transition-all"
+                className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border text-sm w-full md:w-64"
               />
             </div>
-
-            <button
-              onClick={() => downloadAsCSV(items, "物品在庫リスト")}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-secondary text-foreground text-sm font-bold hover:bg-secondary/80 transition-all shadow-sm active:scale-95"
-            >
-              <FileDown className="h-4 w-4" />
-              <span className="hidden sm:inline">CSV出力</span>
-            </button>
-
+            <div className="relative">
+              <button
+                onClick={() => setIsExportModalOpen(!isExportModalOpen)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold shadow-sm active:scale-95 ${isExportModalOpen ? "bg-primary text-white" : "bg-secondary text-foreground hover:bg-secondary/80"}`}
+              >
+                <FileDown className="h-4 w-4" />
+                <span className="hidden sm:inline">CSV出力</span>
+              </button>
+              {isExportModalOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setIsExportModalOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-48 bg-card border rounded-xl shadow-xl z-20 p-2 animate-in fade-in zoom-in-95">
+                    <p className="text-[10px] font-bold text-muted-foreground px-3 py-2 uppercase">
+                      出力順を選択
+                    </p>
+                    <button
+                      onClick={() => handleExport("item_name", "asc")}
+                      className="w-full text-left px-3 py-2 rounded-md hover:bg-secondary text-sm font-medium flex items-center justify-between"
+                    >
+                      物品名順 <ChevronUp className="h-3 w-3 opacity-50" />
+                    </button>
+                    <button
+                      onClick={() => handleExport("stock_quantity", "desc")}
+                      className="w-full text-left px-3 py-2 rounded-md hover:bg-secondary text-sm font-medium flex items-center justify-between"
+                    >
+                      在庫の多い順{" "}
+                      <ChevronDown className="h-3 w-3 opacity-50" />
+                    </button>
+                    <button
+                      onClick={() => handleExport("id", "asc")}
+                      className="w-full text-left px-3 py-2 rounded-md hover:bg-secondary text-sm font-medium flex items-center justify-between"
+                    >
+                      登録順 <ArrowUpDown className="h-3 w-3 opacity-50" />
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <button
               onClick={() => {
                 setEditingItem(null);
                 setFormOpen(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:opacity-90 shadow-sm transition-all whitespace-nowrap"
+              className="flex items-center gap-2 px-4 py-2 bg-primary text-black rounded-lg text-sm font-bold shadow-sm hover:opacity-90"
             >
               <Plus className="h-4 w-4" /> 新規追加
             </button>
           </div>
         </div>
-
-        <div className="bg-secondary/30 rounded-t-xl border-x border-t border-border flex items-center text-[11px] font-bold uppercase text-muted-foreground px-4 py-3">
+        <div className="bg-secondary/30 rounded-t-xl border flex items-center text-[11px] font-bold uppercase text-muted-foreground px-4 py-3">
           <div className="flex-1 flex items-center gap-4">
             <div
-              onClick={() => requestSortItems("item_name")}
-              className="cursor-pointer hover:text-foreground flex items-center gap-1 transition-colors"
+              onClick={() =>
+                setItemSort((p) => ({
+                  key: "item_name",
+                  direction:
+                    p.key === "item_name" && p.direction === "asc"
+                      ? "desc"
+                      : "asc",
+                }))
+              }
+              className="cursor-pointer hover:text-foreground"
             >
               物品名 {getSortIcon("item_name", itemSort)}
             </div>
           </div>
           <div
-            onClick={() => requestSortItems("stock_quantity")}
-            className="w-32 text-right cursor-pointer hover:text-foreground flex items-center justify-end gap-1 transition-colors"
+            onClick={() =>
+              setItemSort((p) => ({
+                key: "stock_quantity",
+                direction:
+                  p.key === "stock_quantity" && p.direction === "asc"
+                    ? "desc"
+                    : "asc",
+              }))
+            }
+            className="w-32 text-right cursor-pointer hover:text-foreground flex items-center justify-end gap-1"
           >
             総在庫 {getSortIcon("stock_quantity", itemSort)}
           </div>
           <div className="w-24 px-4 invisible">操作</div>
         </div>
-
         <div className="space-y-2">
-          {groupedItems.length === 0 ? (
-            <div className="p-10 text-center text-muted-foreground bg-card border border-border rounded-xl border-dashed">
-              該当する物品は見つかりません
-            </div>
-          ) : (
-            groupedItems.map((group) => {
-              const isOpen = expandedNames.has(group.item_name);
-              return (
-                <div
-                  key={group.item_name}
-                  className="rounded-xl border border-border bg-card overflow-hidden shadow-sm transition-all"
+          {groupedItems.map((g) => {
+            const open = expandedNames.has(g.item_name);
+            return (
+              <div
+                key={g.item_name}
+                className="rounded-xl border bg-card overflow-hidden shadow-sm"
+              >
+                <button
+                  onClick={() =>
+                    setExpandedNames((p) => {
+                      const n = new Set(p);
+                      n.has(g.item_name)
+                        ? n.delete(g.item_name)
+                        : n.add(g.item_name);
+                      return n;
+                    })
+                  }
+                  className="w-full flex items-center justify-between px-4 py-4 hover:bg-secondary/20 text-left"
                 >
-                  <button
-                    onClick={() => toggleExpand(group.item_name)}
-                    className="w-full flex items-center justify-between px-4 py-4 hover:bg-secondary/20 transition-colors text-left"
+                  <div className="flex items-center gap-3">
+                    {open ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                    <span className="font-bold">{g.item_name}</span>
+                    <span className="text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border">
+                      {g.locations.length} 箇所
+                    </span>
+                  </div>
+                  <div
+                    className={`font-mono font-black text-right w-32 ${g.total_stock < 10 ? "text-destructive" : ""}`}
                   >
-                    <div className="flex items-center gap-3">
-                      {isOpen ? (
-                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <span className="font-bold text-foreground">
-                        {group.item_name}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full border border-border">
-                        {group.locations.length} 箇所
-                      </span>
-                    </div>
-                    <div
-                      className={`font-mono font-black text-right w-32 ${group.total_stock < 10 ? "text-destructive" : "text-foreground"}`}
-                    >
-                      {group.total_stock}
-                    </div>
-                  </button>
-
-                  {isOpen && (
-                    <div className="border-t border-border bg-secondary/10 animate-in slide-in-from-top-1">
-                      <table className="w-full text-sm text-left">
-                        <thead className="text-[10px] text-muted-foreground uppercase bg-secondary/20">
-                          <tr>
-                            <th className="px-10 py-2">保管場所 / 棚番</th>
-                            <th className="px-4 py-2 text-right w-24">在庫</th>
-                            <th className="px-4 py-2">備考</th>
-                            <th className="px-4 py-2 text-center w-28">操作</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/40">
-                          {group.locations.map((item) => (
-                            <tr
-                              key={item.id}
-                              className="hover:bg-secondary/30 transition-colors"
+                    {g.total_stock}
+                  </div>
+                </button>
+                {open && (
+                  <div className="border-t bg-secondary/10">
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-[10px] text-muted-foreground uppercase bg-secondary/20">
+                        <tr>
+                          <th className="px-10 py-2">保管場所 / 棚番</th>
+                          <th className="px-4 py-2 text-right w-24">在庫</th>
+                          <th className="px-4 py-2">備考</th>
+                          <th className="px-4 py-2 text-center w-28">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {g.locations.map((i) => (
+                          <tr
+                            key={i.id}
+                            className="hover:bg-secondary/30 transition-colors"
+                          >
+                            <td className="px-10 py-3">
+                              <div className="flex flex-col">
+                                <span className="font-medium flex items-center gap-1">
+                                  <MapPin className="h-3 w-3 opacity-50" />{" "}
+                                  {i.location_name}
+                                </span>
+                                <span className="text-[10px] font-mono text-primary font-bold">
+                                  No: {i.location_no}
+                                </span>
+                              </div>
+                            </td>
+                            <td
+                              className={`px-4 py-3 text-right font-mono font-bold ${i.stock_quantity < 10 ? "text-destructive" : ""}`}
                             >
-                              <td className="px-10 py-3">
-                                <div className="flex flex-col">
-                                  <span className="font-medium text-foreground flex items-center gap-1">
-                                    <MapPin className="h-3 w-3 opacity-50" />{" "}
-                                    {item.location_name}
-                                  </span>
-                                  <span className="text-[10px] font-mono text-primary font-bold">
-                                    No: {item.location_no}
-                                  </span>
-                                </div>
-                              </td>
-                              <td
-                                className={`px-4 py-3 text-right font-mono font-bold ${item.stock_quantity < 10 ? "text-destructive" : ""}`}
-                              >
-                                {item.stock_quantity}
-                              </td>
-                              <td className="px-4 py-3 text-xs text-muted-foreground italic">
-                                {item.memo || "-"}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <div className="flex items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setEditingItem(item);
-                                      setFormOpen(true);
-                                    }}
-                                    className="p-1.5 rounded bg-info/10 text-info hover:bg-info hover:text-white transition-all"
-                                  >
-                                    <Pencil className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={() => setDeleteTarget(item)}
-                                    className="p-1.5 rounded bg-destructive/10 text-destructive hover:bg-destructive hover:text-white transition-all"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
+                              {i.stock_quantity}
+                            </td>
+                            <td className="px-4 py-3 text-xs italic">
+                              {i.memo || "-"}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <div className="flex justify-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    setEditingItem(i);
+                                    setFormOpen(true);
+                                  }}
+                                  className="p-1.5 rounded bg-info/10 text-info hover:bg-info hover:text-white"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteTarget(i)}
+                                  className="p-1.5 rounded bg-destructive/10 text-destructive hover:bg-destructive hover:text-white"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </section>
-
       <section className="space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <h3 className="text-lg font-bold text-foreground">物品出庫申請</h3>
+          <h3 className="text-lg font-bold">物品出庫申請</h3>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="申請者・物品名で検索..."
+              placeholder="検索..."
               value={requestSearch}
               onChange={(e) => setRequestSearch(e.target.value)}
-              className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border border-border text-sm focus:outline-none focus:ring-1 ring-primary w-full md:w-64 transition-all"
+              className="pl-9 pr-4 py-2 rounded-lg bg-secondary/50 border text-sm w-full md:w-64"
             />
           </div>
         </div>
-        <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+        <div className="rounded-xl border bg-card overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left min-w-[900px]">
               <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
                 <tr>
                   <th
-                    onClick={() => requestSortRequests("id")}
-                    className="px-4 py-4 w-20 cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setRequestSort((p) => ({
+                        key: "id",
+                        direction:
+                          p.key === "id" && p.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                    className="px-4 py-4 w-20 cursor-pointer"
                   >
-                    <div className="flex items-center gap-1">
-                      ID {getSortIcon("id", requestSort)}
-                    </div>
+                    ID {getSortIcon("id", requestSort)}
                   </th>
                   <th
-                    onClick={() => requestSortRequests("status")}
-                    className="px-4 py-4 w-24 cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setRequestSort((p) => ({
+                        key: "status",
+                        direction:
+                          p.key === "status" && p.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                    className="px-4 py-4 w-24 cursor-pointer"
                   >
-                    <div className="flex items-center gap-1">
-                      状態 {getSortIcon("status", requestSort)}
-                    </div>
+                    状態 {getSortIcon("status", requestSort)}
                   </th>
                   <th
-                    onClick={() => requestSortRequests("user_name")}
-                    className="px-4 py-4 cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setRequestSort((p) => ({
+                        key: "user_name",
+                        direction:
+                          p.key === "user_name" && p.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                    className="px-4 py-4 cursor-pointer"
                   >
-                    <div className="flex items-center gap-1">
-                      申請者 {getSortIcon("user_name", requestSort)}
-                    </div>
+                    申請者 {getSortIcon("user_name", requestSort)}
                   </th>
                   <th
-                    onClick={() => requestSortRequests("item_name")}
-                    className="px-4 py-4 cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setRequestSort((p) => ({
+                        key: "item_name",
+                        direction:
+                          p.key === "item_name" && p.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                    className="px-4 py-4 cursor-pointer"
                   >
-                    <div className="flex items-center gap-1">
-                      物品 {getSortIcon("item_name", requestSort)}
-                    </div>
+                    物品 {getSortIcon("item_name", requestSort)}
                   </th>
                   <th
-                    onClick={() => requestSortRequests("request_quantity")}
-                    className="px-4 py-4 text-right cursor-pointer hover:text-foreground transition-colors"
+                    onClick={() =>
+                      setRequestSort((p) => ({
+                        key: "request_quantity",
+                        direction:
+                          p.key === "request_quantity" && p.direction === "asc"
+                            ? "desc"
+                            : "asc",
+                      }))
+                    }
+                    className="px-4 py-4 text-right cursor-pointer"
                   >
-                    <div className="flex items-center justify-end gap-1">
-                      数量 {getSortIcon("request_quantity", requestSort)}
-                    </div>
+                    数量 {getSortIcon("request_quantity", requestSort)}
                   </th>
                   <th className="px-4 py-4">メモ</th>
                   <th className="px-4 py-4 text-center">アクション</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/50">
-                {sortedRequests.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-10 text-center text-muted-foreground italic"
+              <tbody className="divide-y">
+                {sortedRequests.map((r) => {
+                  const i = items.find((item) => item.id === r.item_id),
+                    u = users.find((user) => user.id === r.user_id);
+                  return (
+                    <tr
+                      key={r.id}
+                      className="hover:bg-secondary/30 transition-colors"
                     >
-                      該当する申請は見つかりません
-                    </td>
-                  </tr>
-                ) : (
-                  sortedRequests.map((req) => {
-                    const item = items.find((i) => i.id === req.item_id);
-                    const user = users.find(
-                      (u) => String(u.id) === String(req.user_id),
-                    );
-                    return (
-                      <tr
-                        key={req.id}
-                        className="hover:bg-secondary/30 transition-colors"
-                      >
-                        <td className="px-4 py-4 font-mono text-xs opacity-50">
-                          #{req.id}
-                        </td>
-                        <td className="px-4 py-4">
-                          <span
-                            className={`px-2 py-1 rounded text-[10px] font-bold border ${statusStyle[req.status]}`}
-                          >
-                            {statusLabel[req.status]}
-                          </span>
-                        </td>
-                        <td className="px-4 py-4 font-medium text-foreground">
-                          <div className="flex items-center gap-2">
-                            <UserIcon className="h-3 w-3 text-muted-foreground" />
-                            {user?.user_name ?? (
-                              <span className="opacity-50 font-mono">
-                                {req.user_id}
-                              </span>
-                            )}
+                      <td className="px-4 py-4 font-mono text-xs opacity-50">
+                        #{r.id}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span
+                          className={`px-2 py-1 rounded text-[10px] font-bold border ${statusStyle[r.status]}`}
+                        >
+                          {statusLabel[r.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 font-medium">
+                        <div className="flex items-center gap-2">
+                          <UserIcon className="h-3 w-3 opacity-50" />
+                          {u?.user_name || r.user_id}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 font-bold text-primary">
+                        {i?.item_name || "不明"}
+                      </td>
+                      <td className="px-4 py-4 text-right font-mono font-black">
+                        {r.request_quantity}
+                      </td>
+                      <td className="px-4 py-4 text-xs italic">
+                        {r.memo || "-"}
+                      </td>
+                      <td className="px-4 py-4">
+                        {!isSuperAdmin ? (
+                          <div className="text-center text-[10px] italic">
+                            閲覧のみ
                           </div>
-                        </td>
-                        <td className="px-4 py-4 font-bold text-primary">
-                          {item?.item_name ?? "不明な物品"}
-                        </td>
-                        <td className="px-4 py-4 text-right font-mono font-black">
-                          {req.request_quantity}
-                        </td>
-                        <td className="px-4 py-4">
-                          <div className="text-xs text-muted-foreground truncate max-w-[150px]">
-                            {req.memo ? (
-                              <span className="flex items-center gap-1">
-                                <FileText className="h-3 w-3" /> {req.memo}
-                              </span>
-                            ) : (
-                              "-"
-                            )}
+                        ) : r.status === "pending" ? (
+                          <div className="flex justify-center gap-2">
+                            <button
+                              onClick={() => updateStatus(r.id, "approved")}
+                              className="px-3 py-1.5 bg-success text-white rounded text-xs font-bold active:scale-95"
+                            >
+                              承認
+                            </button>
+                            <button
+                              onClick={() => updateStatus(r.id, "rejected")}
+                              className="px-3 py-1.5 bg-destructive text-white rounded text-xs font-bold active:scale-95"
+                            >
+                              却下
+                            </button>
                           </div>
-                        </td>
-                        <td className="px-4 py-4">
-                          {!isSuperAdmin ? (
-                            <div className="text-center text-[10px] text-muted-foreground italic">
-                              閲覧のみ
-                            </div>
-                          ) : req.status === "pending" ? (
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                onClick={() =>
-                                  updateRequestStatus(req.id, "approved")
-                                }
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-success text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
-                              >
-                                <CheckCircle className="h-3 w-3" /> 承認
-                              </button>
-                              <button
-                                onClick={() =>
-                                  updateRequestStatus(req.id, "rejected")
-                                }
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-destructive text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
-                              >
-                                <XCircle className="h-3 w-3" /> 却下
-                              </button>
-                            </div>
-                          ) : req.status === "approved" ? (
-                            <div className="flex justify-center">
-                              <button
-                                onClick={() =>
-                                  updateRequestStatus(req.id, "returned")
-                                }
-                                className="flex items-center gap-1 px-3 py-1.5 rounded-md bg-info text-white text-xs font-bold hover:opacity-90 shadow-sm transition-all active:scale-95"
-                              >
-                                <RotateCcw className="h-3 w-3" /> 返却を確認
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="text-center text-[10px] text-muted-foreground italic">
-                              処理済み
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                        ) : r.status === "approved" ? (
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => updateStatus(r.id, "returned")}
+                              className="px-3 py-1.5 bg-info text-white rounded text-xs font-bold active:scale-95"
+                            >
+                              返却確認
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="text-center text-[10px] opacity-50">
+                            処理済
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       </section>
-
       <ItemFormModal
         open={formOpen}
         onClose={() => {
           setFormOpen(false);
           setEditingItem(null);
         }}
-        onSave={() => {
+        onSave={(newItem?: Item) => {
+          if (!newItem) {
+            reloadAll();
+            setFormOpen(false);
+            setEditingItem(null);
+            return;
+          }
+
+          if (editingItem) {
+            const diff: string[] = [];
+            const fields = [
+              { key: "item_name", label: "物品名" },
+              { key: "location_name", label: "保管場所" },
+              { key: "location_no", label: "棚番" },
+              { key: "stock_quantity", label: "在庫数" },
+              { key: "memo", label: "備考" },
+            ] as const;
+
+            fields.forEach(({ key, label }) => {
+              const oldVal = editingItem[key as keyof Item];
+              const newVal = newItem[key as keyof Item];
+              if (oldVal !== newVal) {
+                diff.push(
+                  `${label}: ${oldVal ?? "なし"} → ${newVal ?? "なし"}`,
+                );
+              }
+            });
+
+            if (diff.length > 0) {
+              sendInventoryNotification(
+                `🛠️ **物品修正**\n物品名: ${editingItem.item_name}\n実行者: ${currentUser?.user_name}\n\n【変更内容】\n${diff.join("\n")}`,
+              );
+            }
+          } else {
+            sendInventoryNotification(
+              `🆕 **新規登録**\n物品名: ${newItem.item_name}\n場所: ${newItem.location_name}\n在庫: ${newItem.stock_quantity}\n実行者: ${currentUser?.user_name}`,
+            );
+          }
           reloadAll();
           setFormOpen(false);
           setEditingItem(null);
@@ -612,15 +677,16 @@ const AdminPage = () => {
         onConfirm={async () => {
           if (!deleteTarget) return;
           try {
-            const { error } = await supabase
-              .from("items")
-              .delete()
-              .eq("id", deleteTarget.id);
-            if (error) throw error;
-            toast.success("削除しました");
+            await supabase.from("items").delete().eq("id", deleteTarget.id);
+
+            await sendInventoryNotification(
+              `🗑️ **物品削除**\n物品名: ${deleteTarget.item_name}\n場所: ${deleteTarget.location_name}\n実行者: ${currentUser?.user_name}`,
+            );
+
+            toast.success("削除完了");
             reloadAll();
-          } catch (error: any) {
-            toast.error("削除失敗: " + error.message);
+          } catch (e: any) {
+            toast.error(e.message);
           } finally {
             setDeleteTarget(null);
           }

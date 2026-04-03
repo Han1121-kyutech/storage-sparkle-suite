@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
 
 @layer base {
   :root {
@@ -66,6 +66,36 @@
 
 @layer utilities {
   .font-mono-display {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: "JetBrains Mono", monospace;
+  }
+}
+
+/* 印刷用スタイル：印刷時のみ適用される */
+@media print {
+  /* サイドバー、検索窓、ボタン、タブなどを隠す */
+  nav,
+  aside,
+  button,
+  .no-print,
+  input,
+  select {
+    display: none !important;
+  }
+
+  /* 背景色や枠線を印刷に最適化 */
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  .bg-card,
+  .bg-secondary {
+    background: transparent !important;
+    border: 1px solid #ddd !important;
+  }
+
+  /* アコーディオンを強制的に開いて印刷する設定（ブラウザによる） */
+  details {
+    display: block !important;
   }
 }

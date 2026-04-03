@@ -7,6 +7,7 @@ import {
 } from "react";
 import { User } from "@/types";
 import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
 type AuthContextType = {
   currentUser: User | null;
@@ -30,15 +31,40 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("currentUser");
-    if (savedUser) {
-      try {
-        setCurrentUser(JSON.parse(savedUser));
-      } catch (e) {
-        localStorage.removeItem("currentUser");
+    const initAuth = async () => {
+      const savedUserStr = localStorage.getItem("currentUser");
+      if (savedUserStr) {
+        try {
+          const localUser = JSON.parse(savedUserStr) as User;
+
+          // DBから最新の状態を取得（凍結・削除のチェック）
+          const { data: latestUser, error } = await supabase
+            .from("users")
+            .select("*")
+            .eq("id", localUser.id)
+            .maybeSingle();
+
+          if (!error && latestUser && latestUser.is_active !== false) {
+            // 有効なユーザーであれば状態を更新
+            setCurrentUser(latestUser);
+            localStorage.setItem("currentUser", JSON.stringify(latestUser));
+          } else {
+            // 凍結されていたり存在しない場合は強制ログアウト
+            if (latestUser?.is_active === false) {
+              toast.error("このアカウントは凍結されています。");
+            }
+            localStorage.removeItem("currentUser");
+            setCurrentUser(null);
+          }
+        } catch (e) {
+          localStorage.removeItem("currentUser");
+          setCurrentUser(null);
+        }
       }
-    }
-    setIsLoading(false);
+      setIsLoading(false);
+    };
+
+    initAuth();
   }, []);
 
   const login = async (user_name: string, password?: string) => {
@@ -53,19 +79,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) throw new Error("DB接続エラーが発生しました");
       if (!data) throw new Error("そのユーザー名は登録されていません");
 
-      // --- 【追加】凍結（論理削除）チェック ---
-      // is_activeがfalseの場合、パスワードが合っていようが問答無用で弾く
+      // 凍結（論理削除）チェック
       if (data.is_active === false) {
         throw new Error("このアカウントは凍結されています。");
       }
 
-      // --- 管理者専用のパスワード検証ロジック ---
+      // 管理者専用のパスワード検証
       if (data.role >= 1) {
-        // パスワードがまだ送られてきていない場合はUI側に要求フラグを返す
         if (!password) {
           throw new Error("PASSWORD_REQUIRED");
         }
-        // パスワードが送られてきたが、DBと一致しない場合
         if (data.password !== password) {
           throw new Error("パスワードが間違っています");
         }
@@ -91,7 +114,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       const { data, error } = await supabase
         .from("users")
-        .insert([{ user_name, role: 0 }]) // is_activeはDB側で自動的にTRUEになる
+        .insert([{ user_name, role: 0 }])
         .select()
         .single();
 

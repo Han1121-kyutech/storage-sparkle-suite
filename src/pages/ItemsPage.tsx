@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { Item } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
+import { sendInventoryNotification } from "@/utils/notificationUtils";
 import {
   Search,
   ChevronDown,
@@ -20,6 +22,7 @@ type GroupedItem = {
 };
 
 const ItemsPage = () => {
+  const { currentUser } = useAuth();
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -64,6 +67,11 @@ const ItemsPage = () => {
       ]);
 
       if (error) throw error;
+
+      // 在庫管理用Botへ通知
+      await sendInventoryNotification(
+        `📦 **新規物品登録**\n物品名: ${newItem.item_name}\n保管場所: ${newItem.location_name} (${newItem.location_no})\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name || "不明"}`,
+      );
 
       toast.success("物品を追加しました");
       setNewItem({
@@ -126,7 +134,6 @@ const ItemsPage = () => {
         </p>
       </div>
 
-      {/* 物品追加フォーム */}
       <div className="bg-card border border-border rounded-lg p-4 shadow-sm">
         <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
           <Plus className="h-4 w-4 text-primary" /> 新規物品登録
@@ -216,7 +223,7 @@ const ItemsPage = () => {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-primary text-primary-foreground font-bold py-2 rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm active:scale-[0.98]"
+              className="w-full bg-primary text-black font-bold py-2 rounded-md hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm active:scale-[0.98]"
             >
               {submitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -231,7 +238,6 @@ const ItemsPage = () => {
 
       <hr className="border-border" />
 
-      {/* 検索バー */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <input
@@ -243,7 +249,6 @@ const ItemsPage = () => {
         />
       </div>
 
-      {/* 物品一覧 */}
       <div className="space-y-2">
         {loading ? (
           <div className="text-center py-10 opacity-50 animate-pulse font-mono text-xs">
@@ -267,7 +272,6 @@ const ItemsPage = () => {
                       <span className="text-sm font-bold text-foreground">
                         {item.item_name}
                       </span>
-                      {/* 計の横に場所数を追加表示 */}
                       <span className="text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded border border-border/50 font-mono flex items-center gap-1">
                         計: {item.total_stock}{" "}
                         <span className="opacity-50">|</span>{" "}
