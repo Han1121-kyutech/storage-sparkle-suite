@@ -1,25 +1,43 @@
-// src/utils/notificationUtils.ts
+import { toast } from "sonner"; // 追加
 
 const INVENTORY_URL = import.meta.env.VITE_INVENTORY_WEBHOOK_URL;
 const REQUEST_URL = import.meta.env.VITE_REQUEST_WEBHOOK_URL;
 
-const postToDiscord = async (url: string, message: string) => {
-  if (!url) return;
+const postToDiscord = async (
+  url: string | undefined,
+  message: string,
+  botName: string,
+) => {
+  // 1. URLが読み込めているか画面に強制表示して確認
+  if (!url) {
+    toast.error(
+      `❌ ${botName}のURLがundefinedだ。Cloudflareの環境変数がビルド時に注入されていない。`,
+    );
+    console.error("Missing URL for:", botName);
+    return;
+  }
+
   try {
-    await fetch(url, {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: message }),
     });
-  } catch (e) {
-    console.error("Discord通知送信失敗:", e);
+
+    // 2. Discord側に弾かれた場合（400エラー等）の検知
+    if (!response.ok) {
+      toast.error(`Discord送信エラー: HTTP ${response.status}`);
+      console.error("Discord Error:", await response.text());
+    }
+  } catch (e: any) {
+    // 3. fetch自体が失敗した場合（CORSやネットワークエラー）
+    toast.error(`通信エラー: ${e.message}`);
+    console.error("Fetch failed:", e);
   }
 };
 
-// 在庫の追加・修正・削除用
 export const sendInventoryNotification = (msg: string) =>
-  postToDiscord(INVENTORY_URL, `📦 **【在庫管理Bot】**\n${msg}`);
+  postToDiscord(INVENTORY_URL, `📦 **【在庫管理Bot】**\n${msg}`, "INVENTORY");
 
-// 申請・承認・返却用
 export const sendRequestNotification = (msg: string) =>
-  postToDiscord(REQUEST_URL, `📝 **【出庫申請Bot】**\n${msg}`);
+  postToDiscord(REQUEST_URL, `📝 **【出庫申請Bot】**\n${msg}`, "REQUEST");
