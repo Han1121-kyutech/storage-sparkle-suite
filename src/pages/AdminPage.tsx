@@ -398,13 +398,17 @@ const AdminPage = () => {
                           <div className="flex items-center gap-4">
                             <span className="font-bold">
                               {itm?.item_name}{" "}
-                              <span className="text-primary">
+                              <span className="text-primary font-mono ml-1">
                                 x{r.request_quantity}
                               </span>
                             </span>
-                            <span className="text-[10px] italic opacity-60 line-clamp-1">
-                              {r.memo}
+                            <span className="text-[10px] italic opacity-60">
+                              ラベル: {itm?.label_no || "-"} | 規格:{" "}
+                              {itm?.specifications || "-"}
                             </span>
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-1">
+                            備考: {r.memo || "-"}
                           </div>
                           {r.scheduled_date && (
                             <div className="text-[9px] text-primary flex items-center gap-1 mt-0.5 font-bold">
@@ -539,7 +543,7 @@ const AdminPage = () => {
                             <tr>
                               <th className="px-4 py-3">ID</th>
                               <th className="px-4 py-3">保管場所 / 棚番</th>
-                              <th className="px-4 py-3">ラベル</th>
+                              <th className="px-4 py-3">ラベル / 規格</th>
                               <th className="px-4 py-3 text-right">個別在庫</th>
                               <th className="px-4 py-3 text-center">操作</th>
                             </tr>
@@ -560,8 +564,15 @@ const AdminPage = () => {
                                     #{i.location_no}
                                   </span>
                                 </td>
-                                <td className="px-4 py-3 font-mono opacity-70">
-                                  {i.label_no || "-"}
+                                <td className="px-4 py-3 text-xs font-mono">
+                                  {i.label_no && (
+                                    <span className="bg-secondary p-1 rounded mr-2 border border-border/50 text-[10px]">
+                                      {i.label_no}
+                                    </span>
+                                  )}
+                                  <span className="opacity-70 italic font-sans">
+                                    {i.specifications || "-"}
+                                  </span>
                                 </td>
                                 <td
                                   className={`px-4 py-3 text-right font-mono font-black ${getStockColorClass(i.stock_quantity)}`}

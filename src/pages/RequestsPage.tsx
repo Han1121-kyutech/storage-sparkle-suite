@@ -18,6 +18,7 @@ import {
   AlertCircle,
   FileText,
   CalendarDays,
+  MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 import { sendRequestNotification } from "@/utils/notificationUtils";
@@ -75,15 +76,22 @@ const RequestsPage = () => {
   const [requestType, setRequestType] =
     useState<Request["request_type"]>("checkout");
   const [scheduledDate, setScheduledDate] = useState("");
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState<number | "">(1);
   const [memo, setMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // カスタムドロップダウン用のState
+  const [isItemSelectOpen, setIsItemSelectOpen] = useState(false);
+  const [itemSelectSearch, setItemSelectSearch] = useState("");
 
   const fetchData = async () => {
     try {
       const [reqRes, itemRes, userRes] = await Promise.all([
         supabase.from("requests").select("*"),
-        supabase.from("items").select("*").order("id", { ascending: true }),
+        supabase
+          .from("items")
+          .select("*")
+          .order("item_name", { ascending: true }),
         supabase.from("users").select("*"),
       ]);
       if (reqRes.error) throw reqRes.error;
@@ -115,20 +123,35 @@ const RequestsPage = () => {
     }));
   };
 
+  const calculateEffectiveStock = (itemId: number, currentStock: number) => {
+    const reservedSum = requests
+      .filter(
+        (r) =>
+          r.item_id === itemId &&
+          (r.status === "approved" || r.status === "pending"),
+      )
+      .reduce((sum, r) => sum + r.request_quantity, 0);
+    return Math.max(0, currentStock - reservedSum);
+  };
+
   const filteredAndSortedRequests = useMemo(() => {
     const baseRequests = isAdmin
       ? requests
       : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
     const filtered = baseRequests.filter((req) => {
-      const itemName = items.find((i) => i.id === req.item_id)?.item_name ?? "";
+      const item = items.find((i) => i.id === req.item_id);
+      const itemName = item?.item_name ?? "";
+      const itemLabel = item?.label_no ?? "";
       const userName =
         users.find((u) => String(u.id) === String(req.user_id))?.user_name ??
         "";
       const typeName = typeLabel[req.request_type || "checkout"];
       const searchLower = searchTerm.toLowerCase();
+
       return (
         itemName.toLowerCase().includes(searchLower) ||
+        itemLabel.toLowerCase().includes(searchLower) ||
         userName.toLowerCase().includes(searchLower) ||
         typeName.toLowerCase().includes(searchLower) ||
         (req.memo && req.memo.toLowerCase().includes(searchLower))
@@ -172,22 +195,18 @@ const RequestsPage = () => {
     e.preventDefault();
     if (!currentUser) return;
     const targetItem = items.find((i) => i.id === selectedItemId);
+    const reqQty = Number(quantity);
 
-    // 有効在庫（Effective Stock）のチェックを追加
+    if (reqQty <= 0) {
+      return toast.error("数量は1以上を入力してください。");
+    }
+
     if (targetItem) {
-      const reservedSum = requests
-        .filter(
-          (r) =>
-            r.item_id === targetItem.id &&
-            (r.status === "approved" || r.status === "pending"),
-        )
-        .reduce((sum, r) => sum + r.request_quantity, 0);
-      const effectiveStock = Math.max(
-        0,
-        targetItem.stock_quantity - reservedSum,
+      const effectiveStock = calculateEffectiveStock(
+        targetItem.id,
+        targetItem.stock_quantity,
       );
-
-      if (quantity > effectiveStock) {
+      if (reqQty > effectiveStock) {
         return toast.error(
           `申請失敗: 他の予約を含めた有効在庫は残り ${effectiveStock} です。`,
         );
@@ -208,7 +227,7 @@ const RequestsPage = () => {
           item_id: selectedItemId,
           user_id: currentUser.id,
           request_type: requestType,
-          request_quantity: quantity,
+          request_quantity: reqQty,
           memo: finalMemo,
           status: "pending",
           scheduled_date: scheduledDate || null,
@@ -217,7 +236,7 @@ const RequestsPage = () => {
       if (error) throw error;
 
       await sendRequestNotification(
-        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name}\n数量: ${quantity}\n使用予定日: ${scheduledDate || "即時"}\n備考: ${finalMemo || "なし"}`,
+        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name} ${targetItem?.label_no ? `[${targetItem.label_no}]` : ""}\n数量: ${reqQty}\n使用予定日: ${scheduledDate || "即時"}\n備考: ${finalMemo || "なし"}`,
       );
 
       toast.success("申請完了");
@@ -292,7 +311,7 @@ const RequestsPage = () => {
                 onClick={() => handleSort("item_name")}
                 className="px-4 py-3 cursor-pointer hover:text-foreground transition-colors"
               >
-                物品 {getSortIcon("item_name")}
+                物品 / 規格 {getSortIcon("item_name")}
               </th>
               <th className="px-4 py-3">申請者</th>
               <th className="px-4 py-3 text-right">数量</th>
@@ -343,8 +362,20 @@ const RequestsPage = () => {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-bold text-foreground">
-                      {item?.item_name || "不明"}
+                    <td className="px-4 py-3">
+                      <div className="font-bold text-foreground">
+                        {item?.item_name || "不明"}
+                      </div>
+                      <div className="text-[10px] flex items-center gap-2 mt-1">
+                        {item?.label_no && (
+                          <span className="bg-secondary px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground">
+                            {item.label_no}
+                          </span>
+                        )}
+                        <span className="italic text-muted-foreground">
+                          {item?.specifications || "-"}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-xs flex items-center gap-1">
                       <UserIcon className="h-3 w-3 opacity-50" />{" "}
@@ -367,7 +398,7 @@ const RequestsPage = () => {
                           req.request_type === "checkout" && (
                             <button
                               onClick={() => handleReturn(req)}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold transition-all"
+                              className="flex items-center gap-1 px-3 py-1.5 bg-info/10 text-info hover:bg-info hover:text-white rounded text-[10px] font-bold transition-all shadow-sm"
                             >
                               <RotateCcw className="h-3 w-3" /> 返却
                             </button>
@@ -416,11 +447,21 @@ const RequestsPage = () => {
                   </span>
                 </div>
                 <div className="flex justify-between items-start gap-4">
-                  <div className="space-y-1 flex-1">
+                  <div className="space-y-1.5 flex-1">
                     <div className="font-bold text-foreground text-sm line-clamp-1">
                       {item?.item_name || "不明"}
                     </div>
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <div className="text-[10px] flex items-center gap-2 flex-wrap">
+                      {item?.label_no && (
+                        <span className="bg-secondary px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground">
+                          {item.label_no}
+                        </span>
+                      )}
+                      <span className="italic text-muted-foreground">
+                        {item?.specifications || "-"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
                       <UserIcon className="h-3 w-3" /> {user?.user_name}
                     </div>
                   </div>
@@ -451,7 +492,7 @@ const RequestsPage = () => {
                   req.request_type === "checkout" && (
                     <button
                       onClick={() => handleReturn(req)}
-                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-info/10 text-info hover:bg-info hover:text-white border border-info/20 rounded-lg text-xs font-bold active:scale-[0.98] transition-all shadow-sm"
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 bg-info/10 text-info hover:bg-info hover:text-white border border-info/20 rounded-lg text-xs font-bold active:scale-[0.98] transition-all shadow-sm mt-2"
                     >
                       <RotateCcw className="h-4 w-4" /> 返却手続きをする
                     </button>
@@ -464,8 +505,45 @@ const RequestsPage = () => {
     </div>
   );
 
+  // カスタムドロップダウンの選択中アイテムの表示ロジック
+  const renderSelectedItem = () => {
+    const item = items.find((i) => i.id === selectedItemId);
+    if (!item)
+      return (
+        <span className="text-muted-foreground">物品を選択してください...</span>
+      );
+
+    const eff = calculateEffectiveStock(item.id, item.stock_quantity);
+    return (
+      <div className="flex items-center gap-2 w-full truncate pr-4">
+        <span
+          className={`px-2 py-0.5 rounded text-[10px] font-black border ${eff > 0 ? "bg-success/10 text-success border-success/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
+        >
+          {eff > 0 ? `残 ${eff}` : "在庫切"}
+        </span>
+        <span className="font-bold text-sm truncate">{item.item_name}</span>
+        {item.label_no && (
+          <span className="text-[10px] font-mono bg-secondary px-1 rounded text-muted-foreground shrink-0">
+            {item.label_no}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  // カスタムドロップダウン内の検索とフィルタリング
+  const dropdownFilteredItems = useMemo(() => {
+    const q = itemSelectSearch.toLowerCase();
+    return items.filter(
+      (i) =>
+        i.item_name.toLowerCase().includes(q) ||
+        (i.label_no && i.label_no.toLowerCase().includes(q)) ||
+        i.location_name.toLowerCase().includes(q),
+    );
+  }, [items, itemSelectSearch]);
+
   return (
-    <div className="space-y-6 pb-20 max-w-[1200px] mx-auto">
+    <div className="space-y-6 pb-20 max-w-[1200px] mx-auto relative">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold font-mono flex items-center gap-2 text-foreground tracking-tighter">
@@ -480,10 +558,10 @@ const RequestsPage = () => {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="名前・物品・理由で検索..."
+              placeholder="名前・ラベル・理由で検索..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all"
+              className="pl-9 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all shadow-sm"
             />
           </div>
           <button
@@ -503,28 +581,109 @@ const RequestsPage = () => {
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="p-5 sm:p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4"
+          className="p-5 sm:p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4 relative"
         >
           <h3 className="font-bold flex items-center gap-2 text-foreground">
             <Plus className="h-4 w-4 text-primary" /> 新規申請・予約の作成
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-            <div className="space-y-1.5">
+            {/* ★カスタム・ドロップダウン★ */}
+            <div className="space-y-1.5 md:col-span-2 lg:col-span-1 relative">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 対象物品
               </label>
-              <select
-                value={selectedItemId}
-                onChange={(e) => setSelectedItemId(Number(e.target.value))}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+
+              {/* トリガー部分 */}
+              <div
+                onClick={() => setIsItemSelectOpen(!isItemSelectOpen)}
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border border-transparent hover:border-primary/50 text-foreground text-sm cursor-pointer flex justify-between items-center shadow-inner transition-colors"
               >
-                {items.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.item_name} (在庫: {item.stock_quantity})
-                  </option>
-                ))}
-              </select>
+                {renderSelectedItem()}
+                <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+              </div>
+
+              {/* ドロップダウンメニュー展開部分 */}
+              {isItemSelectOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsItemSelectOpen(false)}
+                  ></div>
+                  <div className="absolute z-50 top-full left-0 w-full md:w-[400px] mt-1 bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2">
+                    <div className="p-2 border-b border-border bg-secondary/20">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="物品名・ラベルで絞り込み..."
+                          value={itemSelectSearch}
+                          onChange={(e) => setItemSelectSearch(e.target.value)}
+                          className="w-full pl-7 pr-2 py-2 rounded-lg bg-card border border-border text-xs outline-none focus:ring-1 ring-primary"
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto p-1.5 space-y-1">
+                      {dropdownFilteredItems.length === 0 ? (
+                        <div className="text-center p-4 text-xs text-muted-foreground">
+                          見つかりません
+                        </div>
+                      ) : (
+                        dropdownFilteredItems.map((item) => {
+                          const eff = calculateEffectiveStock(
+                            item.id,
+                            item.stock_quantity,
+                          );
+                          const isDisabled = eff <= 0;
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => {
+                                if (isDisabled) return;
+                                setSelectedItemId(item.id);
+                                setIsItemSelectOpen(false);
+                                setItemSelectSearch("");
+                              }}
+                              className={`flex items-center justify-between p-2.5 rounded-lg transition-colors ${isDisabled ? "opacity-50 cursor-not-allowed bg-secondary/10" : "cursor-pointer hover:bg-primary/10"}`}
+                            >
+                              <div className="flex flex-col gap-1 min-w-0 pr-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-sm truncate">
+                                    {item.item_name}
+                                  </span>
+                                  {item.label_no && (
+                                    <span className="text-[9px] font-mono bg-secondary px-1.5 py-0.5 rounded text-muted-foreground border shrink-0">
+                                      {item.label_no}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
+                                  <MapPin className="h-3 w-3" />{" "}
+                                  {item.location_name} - {item.location_no}
+                                  {item.specifications && (
+                                    <span className="ml-1 italic">
+                                      | {item.specifications}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="shrink-0 flex flex-col items-end">
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-black border ${isDisabled ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-success/10 text-success border-success/20"}`}
+                                >
+                                  {isDisabled ? "在庫切" : `残 ${eff}`}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
+
             <div className="space-y-1.5">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 申請種別
@@ -534,7 +693,7 @@ const RequestsPage = () => {
                 onChange={(e) =>
                   setRequestType(e.target.value as Request["request_type"])
                 }
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none font-bold"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none font-bold shadow-inner"
               >
                 <option value="checkout">貸出 / 予約</option>
                 <option value="consume">消費 (返却不要)</option>
@@ -551,7 +710,7 @@ const RequestsPage = () => {
                 onChange={(e) => setScheduledDate(e.target.value)}
                 min={new Date().toISOString().split("T")[0]}
                 max="9999-12-31"
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
               />
             </div>
             <div className="space-y-1.5">
@@ -561,9 +720,14 @@ const RequestsPage = () => {
               <input
                 type="number"
                 min={1}
-                value={quantity || ""}
-                onChange={(e) => setQuantity(Number(e.target.value))}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                value={quantity === 0 ? "" : quantity}
+                onChange={(e) =>
+                  setQuantity(
+                    e.target.value === "" ? "" : Number(e.target.value),
+                  )
+                }
+                onFocus={(e) => e.target.select()}
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner font-mono font-bold"
                 required
               />
             </div>
@@ -575,7 +739,7 @@ const RequestsPage = () => {
                 type="text"
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
                 placeholder={
                   requestType === "dispose"
                     ? "破損理由を入力"
@@ -588,7 +752,7 @@ const RequestsPage = () => {
           <button
             type="submit"
             disabled={submitting || items.length === 0}
-            className="w-full sm:w-auto px-10 py-3 rounded-lg bg-primary text-black text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all"
+            className="w-full sm:w-auto px-10 py-3 rounded-lg bg-primary text-black text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all mt-2"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
