@@ -77,6 +77,7 @@ const RequestsPage = () => {
   // 一括申請用のState
   const [selectedItems, setSelectedItems] = useState<Item[]>([]);
   const [resDate, setResDate] = useState("");
+  const [resReturnDate, setResReturnDate] = useState(""); // ✅ ここに正しく配置
   const [resQtyMap, setResQtyMap] = useState<Record<number, number>>({});
   const [resTypeMap, setResTypeMap] = useState<
     Record<number, Request["request_type"]>
@@ -206,6 +207,24 @@ const RequestsPage = () => {
     });
   }, [requests, items, users, currentUser, searchTerm, sortConfig, isAdmin]);
 
+  const todaysReservations = useMemo(() => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const todayStr = `${y}-${m}-${day}`;
+
+    const base = isAdmin
+      ? requests
+      : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
+
+    return base.filter(
+      (r) =>
+        r.scheduled_date === todayStr &&
+        (r.status === "pending" || r.status === "approved"),
+    );
+  }, [requests, currentUser, isAdmin]);
+
   const pendingRequests = filteredAndSortedRequests.filter(
     (r) => r.status === "pending",
   );
@@ -218,6 +237,13 @@ const RequestsPage = () => {
     if (!currentUser) return;
     if (selectedItems.length === 0)
       return toast.error("物品を選択してください");
+
+    const hasCheckout = selectedItems.some(
+      (i) => (resTypeMap[i.id] || "checkout") === "checkout",
+    );
+    if (hasCheckout && !resReturnDate) {
+      return toast.error("貸出を含む申請には、返却予定日の入力が必須です");
+    }
 
     for (const item of selectedItems) {
       const eff = calculateEffectiveStock(item.id, item.stock_quantity);
@@ -233,17 +259,28 @@ const RequestsPage = () => {
     setSubmitting(true);
     try {
       const dateStr = resDate ? resDate.split("-").join("/") : "即時";
+      const retDateStr = resReturnDate
+        ? resReturnDate.split("-").join("/")
+        : "";
 
       const insertData = selectedItems.map((item) => {
         let finalMemo = resMemoMap[item.id].trim();
-        if (resDate)
-          finalMemo = `【予定日:${dateStr}】${finalMemo ? ` / ${finalMemo}` : ""}`;
+        const type = resTypeMap[item.id] || "checkout";
+
+        const dates = [];
+        if (resDate) dates.push(`使用:${dateStr}`);
+        if (type === "checkout" && resReturnDate)
+          dates.push(`返却:${retDateStr}`);
+
+        if (dates.length > 0) {
+          finalMemo = `【${dates.join(" / ")}】${finalMemo ? ` ${finalMemo}` : ""}`;
+        }
 
         return {
           item_id: item.id,
           user_id: currentUser.id,
           request_quantity: resQtyMap[item.id],
-          request_type: resTypeMap[item.id],
+          request_type: type,
           status: "pending",
           scheduled_date: resDate || null,
           memo: finalMemo,
@@ -268,6 +305,7 @@ const RequestsPage = () => {
       setShowForm(false);
       setSelectedItems([]);
       setResDate("");
+      setResReturnDate("");
       fetchData();
     } catch (error: any) {
       toast.error("申請失敗: " + error.message);
@@ -554,6 +592,103 @@ const RequestsPage = () => {
 
   return (
     <div className="space-y-6 pb-20 max-w-[1200px] mx-auto relative">
+      {/* ★ 本日の予約アラートパネル ★ */}
+      {todaysReservations.length > 0 && (
+        <div className="bg-gradient-to-r from-primary/20 to-transparent border-l-4 border-primary rounded-r-xl p-4 sm:p-5 shadow-sm animate-in fade-in slide-in-from-top-4">
+          <div className="flex items-start gap-3">
+            <div className="bg-primary text-black p-2 rounded-lg shrink-0">
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-foreground flex items-center gap-2 uppercase tracking-widest text-sm">
+                Today's Reservations
+                <span className="bg-primary text-black px-2 py-0.5 rounded-full text-[10px] font-black">
+                  {todaysReservations.length}件
+                </span>
+              </h3>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-3 font-bold">
+                本日使用予定の物品があります。
+                {isAdmin
+                  ? "貸出準備・承認を行ってください。"
+                  : "受け取りを忘れないでください。"}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {todaysReservations.map((req) => {
+                  const item = items.find((i) => i.id === req.item_id);
+                  const user = users.find(
+                    (u) => String(u.id) === String(req.user_id),
+                  );
+                  return (
+                    <div
+                      key={req.id}
+                      className="bg-card border border-border/50 rounded-xl p-3 flex flex-col shadow-sm hover:border-primary/50 transition-colors gap-2"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 pr-2 flex-1">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span
+                              className={`px-1.5 py-0.5 rounded border text-[8px] font-bold shrink-0 ${typeStyle[req.request_type || "checkout"]}`}
+                            >
+                              {typeLabel[req.request_type || "checkout"]}
+                            </span>
+                            <div className="text-sm font-black text-foreground truncate">
+                              {item?.item_name || "不明な物品"}
+                            </div>
+                          </div>
+
+                          <div className="text-[10px] text-muted-foreground flex items-center gap-2 flex-wrap leading-tight">
+                            {item?.label_no && (
+                              <span className="bg-secondary px-1 rounded font-mono border border-border/50 shrink-0">
+                                {item.label_no}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-0.5 font-bold truncate">
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              {item?.location_name}{" "}
+                              <span className="text-primary font-mono ml-0.5">
+                                #{item?.location_no}
+                              </span>
+                            </span>
+                          </div>
+
+                          {item?.specifications && (
+                            <div className="text-[9px] text-muted-foreground italic truncate mt-1 opacity-80">
+                              {item.specifications}
+                            </div>
+                          )}
+
+                          {isAdmin && (
+                            <div className="text-[10px] font-bold text-foreground bg-secondary/50 px-2 py-0.5 rounded border border-border/50 inline-flex items-center gap-1 mt-2">
+                              <UserIcon className="h-3 w-3 text-primary" />{" "}
+                              {user?.user_name}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-right shrink-0 flex flex-col items-end gap-1 pl-3 border-l border-border/30 min-w-[50px]">
+                          <span className="text-[8px] font-black opacity-40 uppercase tracking-widest">
+                            Qty
+                          </span>
+                          <span className="font-mono font-black text-xl leading-none text-foreground">
+                            {req.request_quantity}
+                          </span>
+                          <span
+                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded mt-auto ${statusStyle[req.status]}`}
+                          >
+                            {statusLabel[req.status]}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ★ ここまで ★ */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold font-mono flex items-center gap-2 text-foreground tracking-tighter">
@@ -578,6 +713,7 @@ const RequestsPage = () => {
             onClick={() => {
               setShowForm(!showForm);
               if (!showForm) {
+                setResReturnDate("");
                 setSelectedItems([]);
                 setResDate("");
                 setResQtyMap({});
@@ -724,17 +860,47 @@ const RequestsPage = () => {
 
           <div className="space-y-1.5">
             <label className="text-[11px] font-bold uppercase opacity-50">
-              共通の使用予定日 (任意)
+              受取 / 使用予定日 (任意)
             </label>
             <input
               type="date"
               value={resDate}
               onChange={(e) => setResDate(e.target.value)}
-              min={new Date().toISOString().split("T")[0]}
+              min={
+                new Date(Date.now() + 9 * 3600000).toISOString().split("T")[0]
+              }
               max="9999-12-31"
               className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
             />
           </div>
+
+          {(() => {
+            const hasCheckout = selectedItems.some(
+              (i) => (resTypeMap[i.id] || "checkout") === "checkout",
+            );
+            if (!hasCheckout) return null;
+
+            return (
+              <div className="space-y-1.5 mt-4">
+                <label className="text-[11px] font-bold text-destructive opacity-80 uppercase tracking-widest">
+                  返却予定日 (貸出時は必須)
+                </label>
+                <input
+                  type="date"
+                  max="9999-12-31"
+                  min={
+                    resDate ||
+                    new Date(Date.now() + 9 * 3600000)
+                      .toISOString()
+                      .split("T")[0]
+                  }
+                  className="w-full bg-destructive/5 px-3 py-2.5 rounded-lg outline-none border border-destructive/30 focus:ring-1 ring-destructive font-bold shadow-inner text-sm text-destructive"
+                  value={resReturnDate}
+                  onChange={(e) => setResReturnDate(e.target.value)}
+                />
+              </div>
+            );
+          })()}
 
           {selectedItems.length > 0 && (
             <div className="space-y-3 pt-4 border-t border-border">

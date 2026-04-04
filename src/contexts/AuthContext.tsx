@@ -102,6 +102,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const register = async (user_name: string) => {
+    // ★ 1. DBへ問い合わせる前に、Cookieが存在するか物理チェック
+    if (document.cookie.includes("has_registered=true")) {
+      throw new Error("この端末・ブラウザからは既に登録済みです（制限）");
+    }
+
     setIsLoading(true);
     try {
       const { data: exists } = await supabase
@@ -119,6 +124,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         .single();
 
       if (error) throw new Error("DBエラー: " + error.message);
+
+      // ★ 2. 登録成功時：1年間有効なCookieをブラウザに刻み込む
+      document.cookie = "has_registered=true; max-age=31536000; path=/";
 
       setCurrentUser(data as User);
       localStorage.setItem("currentUser", JSON.stringify(data));

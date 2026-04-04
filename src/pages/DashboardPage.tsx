@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -11,6 +11,8 @@ import {
   Loader2,
   ChevronRight,
   MapPin,
+  Clock,
+  User as UserIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,20 +22,24 @@ const DashboardPage = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
-        const [itemRes, reqRes] = await Promise.all([
+        const [itemRes, reqRes, userRes] = await Promise.all([
           supabase.from("items").select("*"),
           supabase.from("requests").select("*"),
+          supabase.from("users").select("*"), // ユーザー情報も取得（誰が延滞しているか表示するため）
         ]);
 
         if (itemRes.error) throw itemRes.error;
         if (reqRes.error) throw reqRes.error;
+        if (userRes.error) throw userRes.error;
 
         setItems(itemRes.data || []);
         setRequests(reqRes.data || []);
+        setUsers(userRes.data || []);
       } catch (error: any) {
         toast.error("データの同期に失敗しました: " + error.message);
       } finally {
@@ -51,7 +57,6 @@ const DashboardPage = () => {
     ? requests
     : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
-  // ★ハードコードを排除し、各アイテムの個別閾値（未設定時は5）を基準に判定する
   const lowStockItems = items.filter(
     (i) => i.stock_quantity < (i.alert_threshold ?? 5),
   );
@@ -60,6 +65,29 @@ const DashboardPage = () => {
   const approvedRequests = targetRequests.filter(
     (r) => r.status === "approved",
   );
+
+  // ★ 備考(memo)から返却日を抽出し、延滞しているリクエストを割り出すハック
+  const overdueRequests = useMemo(() => {
+    // ローカルタイムで本日の午前0時を取得
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return approvedRequests.filter((req) => {
+      // 貸出以外は無視
+      if (req.request_type !== "checkout") return false;
+      if (!req.memo) return false;
+
+      // 正規表現で「返却:YYYY/MM/DD」を抽出
+      const match = req.memo.match(/返却:(\d{4}\/\d{2}\/\d{2})/);
+      if (!match) return false;
+
+      const returnDate = new Date(match[1]);
+      returnDate.setHours(0, 0, 0, 0);
+
+      // 返却予定日が今日より前なら延滞（True）
+      return returnDate < today;
+    });
+  }, [approvedRequests]);
 
   const stats = [
     {
@@ -113,6 +141,78 @@ const DashboardPage = () => {
           </span>
         </p>
       </div>
+
+      {/* ★ 返却期限切れアラートパネル ★ */}
+      {overdueRequests.length > 0 && (
+        <div className="bg-destructive/10 border-l-4 border-destructive rounded-r-xl p-4 sm:p-5 shadow-sm animate-in fade-in slide-in-from-top-4">
+          <div className="flex items-start gap-3">
+            <div className="bg-destructive text-white p-2 rounded-lg shrink-0 animate-pulse">
+              <Clock className="h-5 w-5" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-black text-destructive flex items-center gap-2 uppercase tracking-widest text-sm">
+                Overdue Items
+                <span className="bg-destructive text-white px-2 py-0.5 rounded-full text-[10px] font-black">
+                  {overdueRequests.length}件の延滞
+                </span>
+              </h3>
+              <p className="text-xs text-destructive/80 mt-0.5 mb-3 font-bold">
+                {isAdmin
+                  ? "返却予定日を過ぎている貸出があります。利用者に催促してください。"
+                  : "返却予定日を過ぎている物品があります。至急返却してください。"}
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {overdueRequests.map((req) => {
+                  const item = items.find((i) => i.id === req.item_id);
+                  const user = users.find(
+                    (u) => String(u.id) === String(req.user_id),
+                  );
+                  const match = req.memo?.match(/返却:(\d{4}\/\d{2}\/\d{2})/);
+                  const returnDateStr = match ? match[1] : "不明";
+
+                  return (
+                    <div
+                      key={req.id}
+                      onClick={() => navigate(isAdmin ? "/admin" : "/requests")}
+                      className="bg-card border border-destructive/30 rounded-xl p-3 flex flex-col shadow-sm hover:border-destructive transition-colors gap-2 cursor-pointer"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 pr-2 flex-1">
+                          <div className="text-sm font-black text-foreground truncate">
+                            {item?.item_name || "不明な物品"}
+                          </div>
+
+                          <div className="text-[10px] text-destructive font-black flex items-center gap-1 mt-1">
+                            <AlertTriangle className="h-3 w-3" /> 期限:{" "}
+                            {returnDateStr}
+                          </div>
+
+                          {isAdmin && (
+                            <div className="text-[10px] font-bold text-foreground bg-secondary/50 px-2 py-0.5 rounded border border-border/50 inline-flex items-center gap-1 mt-2">
+                              <UserIcon className="h-3 w-3 text-destructive" />{" "}
+                              {user?.user_name || "退会ユーザー"}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-right shrink-0 flex flex-col items-end pl-3 border-l border-border/30">
+                          <span className="text-[8px] font-black opacity-40 uppercase tracking-widest">
+                            Qty
+                          </span>
+                          <span className="font-mono font-black text-xl leading-none text-foreground">
+                            {req.request_quantity}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {stats.map((s) => (

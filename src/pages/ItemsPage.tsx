@@ -63,8 +63,8 @@ const ItemsPage = () => {
 
   const [reservingItems, setReservingItems] = useState<Item[]>([]);
   const [resDate, setResDate] = useState("");
+  const [resReturnDate, setResReturnDate] = useState("");
   const [resQtyMap, setResQtyMap] = useState<Record<number, number>>({});
-  // 追加: 個別種別・備考用のState
   const [resTypeMap, setResTypeMap] = useState<
     Record<number, Request["request_type"]>
   >({});
@@ -99,10 +99,30 @@ const ItemsPage = () => {
     fetchData();
   }, []);
 
-  const uniqueLocations = useMemo(
-    () => Array.from(new Set(items.map((i) => i.location_name))).sort(),
-    [items],
-  );
+  // 検索ワードにヒットした物品が存在する拠点のみを抽出する
+  const uniqueLocations = useMemo(() => {
+    const q = search.toLowerCase();
+    const filteredBySearch = items.filter(
+      (i) =>
+        i.item_name.toLowerCase().includes(q) ||
+        i.location_no.toLowerCase().includes(q) ||
+        (i.label_no && i.label_no.toLowerCase().includes(q)) ||
+        (i.category && i.category.toLowerCase().includes(q)),
+    );
+    return Array.from(
+      new Set(filteredBySearch.map((i) => i.location_name)),
+    ).sort();
+  }, [items, search]);
+
+  // 検索の結果、現在選択中の拠点が消滅した場合は強制的に「all」に戻す
+  useEffect(() => {
+    if (
+      selectedLocation !== "all" &&
+      !uniqueLocations.includes(selectedLocation)
+    ) {
+      setSelectedLocation("all");
+    }
+  }, [uniqueLocations, selectedLocation]);
 
   const calculateEffectiveStock = (itemId: number, currentStock: number) => {
     const reservedSum = requests
@@ -159,6 +179,7 @@ const ItemsPage = () => {
 
   const openReserveModal = (itemsToReserve: Item[]) => {
     setReservingItems(itemsToReserve);
+    setResReturnDate("");
     const initialQtys: Record<number, number> = {};
     const initialTypes: Record<number, Request["request_type"]> = {};
     const initialMemos: Record<number, string> = {};
@@ -172,11 +193,18 @@ const ItemsPage = () => {
     setResQtyMap(initialQtys);
     setResTypeMap(initialTypes);
     setResMemoMap(initialMemos);
-    setResDate(""); // 種別が混在するため日付は任意に変更
+    setResDate("");
   };
 
   const handleReserveSubmit = async () => {
     if (reservingItems.length === 0) return;
+
+    const hasCheckout = reservingItems.some(
+      (i) => (resTypeMap[i.id] || "checkout") === "checkout",
+    );
+    if (hasCheckout && !resReturnDate) {
+      return toast.error("貸出を含む申請には、返却予定日の入力が必須です");
+    }
 
     for (const item of reservingItems) {
       const eff = calculateEffectiveStock(item.id, item.stock_quantity);
@@ -198,18 +226,29 @@ const ItemsPage = () => {
     setSubmitting(true);
     try {
       const dateStr = resDate ? resDate.split("-").join("/") : "即時";
+      const retDateStr = resReturnDate
+        ? resReturnDate.split("-").join("/")
+        : "";
 
       const insertData = reservingItems.map((item) => {
         let finalMemo = resMemoMap[item.id].trim();
-        if (resDate) {
-          finalMemo = `【予定日:${dateStr}】${finalMemo ? ` / ${finalMemo}` : ""}`;
+        const type = resTypeMap[item.id] || "checkout";
+
+        // memoに予定日と返却日を埋め込む
+        const dates = [];
+        if (resDate) dates.push(`使用:${dateStr}`);
+        if (type === "checkout" && resReturnDate)
+          dates.push(`返却:${retDateStr}`);
+
+        if (dates.length > 0) {
+          finalMemo = `【${dates.join(" / ")}】${finalMemo ? ` ${finalMemo}` : ""}`;
         }
 
         return {
           item_id: item.id,
           user_id: currentUser?.id,
           request_quantity: resQtyMap[item.id],
-          request_type: resTypeMap[item.id],
+          request_type: type,
           status: "pending",
           scheduled_date: resDate || null,
           memo: finalMemo,
@@ -296,8 +335,15 @@ const ItemsPage = () => {
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <button
             onClick={() => {
-              setIsBulkMode(!isBulkMode);
+              const nextMode = !isBulkMode;
+              setIsBulkMode(nextMode);
               setSelectedItemIds(new Set());
+
+              if (nextMode) {
+                setExpandedIds(new Set(groupedItems.map((g) => g.item_name)));
+              } else {
+                setExpandedIds(new Set());
+              }
             }}
             className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold shadow-sm ${isBulkMode ? "bg-primary text-black border-primary ring-2 ring-primary/20" : "bg-card border-border text-foreground hover:bg-secondary"}`}
           >
@@ -525,8 +571,8 @@ const ItemsPage = () => {
                 </div>
               </button>
               {isOpen && (
-                <div className="border-t border-border bg-secondary/5 overflow-hidden">
-                  <table className="w-full text-sm text-left">
+                <div className="border-t border-border bg-secondary/5 overflow-x-auto">
+                  <table className="w-full min-w-[600px] text-sm text-left">
                     <thead className="bg-secondary/20 text-[10px] font-bold uppercase text-muted-foreground tracking-widest">
                       <tr>
                         {isBulkMode && <th className="px-6 py-3 w-10"></th>}
@@ -625,26 +671,36 @@ const ItemsPage = () => {
 
       {isBulkMode && selectedItemIds.size > 0 && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10">
-          <div className="bg-black/90 backdrop-blur-md border border-primary/30 rounded-2xl p-5 shadow-2xl flex items-center gap-8 min-w-[340px]">
-            <div className="text-white">
+          <div className="bg-black/90 backdrop-blur-md border border-primary/30 rounded-2xl p-4 shadow-2xl flex items-center gap-5 min-w-[360px]">
+            <div className="text-white pl-2">
               <div className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
                 Selected
               </div>
-              <div className="text-2xl font-black">
+              <div className="text-2xl font-black leading-none">
                 {selectedItemIds.size}{" "}
                 <span className="text-[10px] font-medium opacity-50 uppercase">
                   items
                 </span>
               </div>
             </div>
-            <button
-              onClick={() =>
-                openReserveModal(items.filter((i) => selectedItemIds.has(i.id)))
-              }
-              className="flex-1 bg-primary text-black font-black py-3.5 rounded-xl shadow-lg hover:opacity-95 active:scale-[0.98] transition-all text-sm uppercase tracking-tighter"
-            >
-              一括申請を確定する
-            </button>
+            <div className="flex flex-1 gap-2">
+              <button
+                onClick={() => setSelectedItemIds(new Set())}
+                className="bg-white/10 text-white font-bold px-4 py-3.5 rounded-xl hover:bg-white/20 active:scale-[0.98] transition-all text-xs whitespace-nowrap"
+              >
+                全解除
+              </button>
+              <button
+                onClick={() =>
+                  openReserveModal(
+                    items.filter((i) => selectedItemIds.has(i.id)),
+                  )
+                }
+                className="flex-1 bg-primary text-black font-black py-3.5 rounded-xl shadow-lg hover:opacity-95 active:scale-[0.98] transition-all text-sm uppercase tracking-tighter whitespace-nowrap"
+              >
+                申請に進む
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -665,7 +721,7 @@ const ItemsPage = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
-                共通の使用予定日 (任意)
+                受取 / 使用予定日 (任意)
               </label>
               <input
                 type="date"
@@ -673,9 +729,40 @@ const ItemsPage = () => {
                 className="w-full bg-secondary/30 p-3 rounded-2xl outline-none border border-border focus:ring-1 ring-primary font-black shadow-inner text-sm"
                 value={resDate}
                 onChange={(e) => setResDate(e.target.value)}
-                min={new Date().toISOString().split("T")[0]}
+                min={
+                  new Date(Date.now() + 9 * 3600000).toISOString().split("T")[0]
+                }
               />
             </div>
+
+            {(() => {
+              const hasCheckout = reservingItems.some(
+                (i) => (resTypeMap[i.id] || "checkout") === "checkout",
+              );
+              if (!hasCheckout) return null;
+
+              return (
+                <div className="space-y-2 mt-4">
+                  <label className="text-[10px] font-black text-destructive opacity-80 uppercase tracking-widest ml-1">
+                    返却予定日 (貸出時は必須)
+                  </label>
+                  <input
+                    type="date"
+                    max="9999-12-31"
+                    min={
+                      resDate ||
+                      new Date(Date.now() + 9 * 3600000)
+                        .toISOString()
+                        .split("T")[0]
+                    }
+                    className="w-full bg-destructive/5 p-3 rounded-2xl outline-none border border-destructive/30 focus:ring-1 ring-destructive font-black shadow-inner text-sm text-destructive"
+                    value={resReturnDate}
+                    onChange={(e) => setResReturnDate(e.target.value)}
+                  />
+                </div>
+              );
+            })()}
+
             <div className="space-y-3 pt-2">
               <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
                 個別設定 (数量・種別・備考)

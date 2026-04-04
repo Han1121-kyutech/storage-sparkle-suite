@@ -21,7 +21,7 @@ const roleLabels: Record<number, string> = {
 };
 
 type SortConfig = {
-  key: keyof User | "status";
+  key: keyof User | "status" | "password";
   direction: "asc" | "desc";
 };
 
@@ -34,7 +34,6 @@ const UsersPage = () => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // ソート状態の管理
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     key: "id",
     direction: "asc",
@@ -44,7 +43,7 @@ const UsersPage = () => {
     try {
       const { data, error } = await supabase
         .from("users")
-        .select("id, user_name, role, is_active");
+        .select("id, user_name, role, is_active, password");
       if (error) throw error;
       setUsers(data || []);
     } catch (error: any) {
@@ -58,7 +57,6 @@ const UsersPage = () => {
     fetchUsers();
   }, []);
 
-  // 並び替えロジック
   const sortedUsers = useMemo(() => {
     const sortableItems = [...users];
     sortableItems.sort((a, b) => {
@@ -68,17 +66,16 @@ const UsersPage = () => {
       if (sortConfig.key === "status") {
         aValue = a.is_active !== false ? 1 : 0;
         bValue = b.is_active !== false ? 1 : 0;
+      } else if (sortConfig.key === "password") {
+        aValue = (a as any).password ?? "";
+        bValue = (b as any).password ?? "";
       } else {
         aValue = a[sortConfig.key as keyof User] ?? "";
         bValue = b[sortConfig.key as keyof User] ?? "";
       }
 
-      if (aValue < bValue) {
-        return sortConfig.direction === "asc" ? -1 : 1;
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === "asc" ? 1 : -1;
-      }
+      if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
     return sortableItems;
@@ -108,21 +105,37 @@ const UsersPage = () => {
       return toast.error("自分自身の権限は変更できません");
     }
 
+    const targetUser = users.find((u) => String(u.id) === userId);
+    if (!targetUser) return;
+
     setProcessingId(userId);
     try {
+      const updateData: any = { role: newRole };
+
+      // ★ パスワード未設定のユーザーを管理者に昇格する場合、初期パスワード「admin123」を強制設定
+      if (
+        newRole >= 1 &&
+        (!(targetUser as any).password ||
+          (targetUser as any).password.trim() === "")
+      ) {
+        updateData.password = "admin123";
+      }
+
       const { error } = await supabase
         .from("users")
-        .update({ role: newRole })
+        .update(updateData)
         .eq("id", userId);
 
       if (error) throw error;
 
-      const target = users.find((u) => String(u.id) === userId);
       await sendInventoryNotification(
-        `👤 **権限変更**\n対象: ${target?.user_name}\n新権限: ${roleLabels[newRole]}\n実行者: ${currentUser?.user_name}`,
+        `👤 **権限変更**\n対象: ${targetUser.user_name}\n新権限: ${roleLabels[newRole]}\n実行者: ${currentUser?.user_name}`,
       );
 
-      toast.success(`${target?.user_name} の権限を更新しました`);
+      toast.success(
+        `${targetUser.user_name} の権限を更新しました。` +
+          (updateData.password ? " (初期PW: admin123 を自動設定しました)" : ""),
+      );
       fetchUsers();
     } catch (error: any) {
       toast.error("更新に失敗しました: " + error.message);
@@ -160,7 +173,6 @@ const UsersPage = () => {
 
       toast.success(`${target?.user_name} を${actionText}しました`);
 
-      // 凍結した場合は選択解除
       if (!newStatus) {
         setSelectedIds((prev) => {
           const next = new Set(prev);
@@ -208,16 +220,11 @@ const UsersPage = () => {
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
 
-  // 選択可能なユーザー（自分以外、かつ既に凍結されていないユーザー）
   const selectableUsers = users.filter((u) => {
     const isMe = String(u.id) === String(currentUser?.id);
     const isFrozen = u.is_active === false;
@@ -303,10 +310,18 @@ const UsersPage = () => {
                 </th>
                 <th
                   onClick={() => requestSort("role")}
-                  className="px-4 py-4 w-48 cursor-pointer hover:text-foreground transition-colors group"
+                  className="px-4 py-4 w-40 cursor-pointer hover:text-foreground transition-colors group"
                 >
                   <div className="flex items-center gap-1">
                     権限レベル {getSortIcon("role")}
+                  </div>
+                </th>
+                <th
+                  onClick={() => requestSort("password")}
+                  className="px-4 py-4 w-32 cursor-pointer hover:text-foreground transition-colors group text-center"
+                >
+                  <div className="flex items-center justify-center gap-1">
+                    パスワード {getSortIcon("password")}
                   </div>
                 </th>
                 <th className="px-6 py-4 w-32 text-center font-bold tracking-wider">
@@ -318,6 +333,7 @@ const UsersPage = () => {
               {sortedUsers.map((user) => {
                 const isMe = String(user.id) === String(currentUser?.id);
                 const isActive = user.is_active !== false;
+                const pwd = (user as any).password;
 
                 return (
                   <tr
@@ -367,6 +383,21 @@ const UsersPage = () => {
                         <option value={1}>{roleLabels[1]}</option>
                         <option value={2}>{roleLabels[2]}</option>
                       </select>
+                    </td>
+                    <td className="px-4 py-4 text-center">
+                      {user.role >= 1 ? (
+                        <span className="font-mono text-xs font-bold text-foreground bg-secondary/50 px-2 py-1 rounded border border-border/50">
+                          {pwd || (
+                            <span className="text-destructive font-sans text-[10px]">
+                              未設定
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground opacity-30">
+                          -
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-center">
                       <button
