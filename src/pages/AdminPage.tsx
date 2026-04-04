@@ -78,6 +78,20 @@ const statusStyle: Record<Request["status"], string> = {
   returned: "bg-info/20 text-info border-info/20",
 };
 
+// 追加: 申請種別のラベル定義
+const typeLabel: Record<string, string> = {
+  checkout: "貸出",
+  consume: "消費",
+  dispose: "廃棄",
+};
+
+// 追加: 申請種別の視覚スタイル
+const typeStyle: Record<string, string> = {
+  checkout: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+  consume: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+  dispose: "bg-red-500/10 text-red-500 border-red-500/20",
+};
+
 type SortConfig<T> = {
   key: keyof T | string;
   direction: "asc" | "desc";
@@ -475,6 +489,7 @@ const AdminPage = () => {
                   <td className="px-4 py-4 font-bold">
                     {user?.user_name || "不明"}
                   </td>
+                  {/* // renderRequestTable 内の修正（g.requests.map 部分） */}
                   <td className="px-4 py-4">
                     {g.isBulk ? (
                       <span className="text-xs italic text-muted-foreground flex items-center gap-2 font-bold">
@@ -482,15 +497,23 @@ const AdminPage = () => {
                         ({g.requests.length}件)
                       </span>
                     ) : (
-                      <span className="font-bold text-foreground">
-                        {
-                          items.find((i) => i.id === g.requests[0].item_id)
-                            ?.item_name
-                        }{" "}
-                        <span className="text-primary font-mono ml-1">
-                          x{g.requests[0].request_quantity}
+                      <div className="flex items-center gap-2">
+                        {/* ★ ここに種別バッジを追加 */}
+                        <span
+                          className={`px-2 py-0.5 rounded border text-[9px] font-bold ${typeStyle[g.requests[0].request_type || "checkout"]}`}
+                        >
+                          {typeLabel[g.requests[0].request_type || "checkout"]}
                         </span>
-                      </span>
+                        <span className="font-bold text-foreground">
+                          {
+                            items.find((i) => i.id === g.requests[0].item_id)
+                              ?.item_name
+                          }
+                          <span className="text-primary font-mono ml-1">
+                            x{g.requests[0].request_quantity}
+                          </span>
+                        </span>
+                      </div>
                     )}
                   </td>
                   <td className="px-4 py-4 text-center">
@@ -547,6 +570,12 @@ const AdminPage = () => {
                         <td className="px-4 py-2"></td>
                         <td className="px-4 py-2 border-l-2 border-primary/20">
                           <div className="flex items-center gap-4">
+                            {/* ★ ここに種別バッジを追加 */}
+                            <span
+                              className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${typeStyle[r.request_type || "checkout"]}`}
+                            >
+                              {typeLabel[r.request_type || "checkout"]}
+                            </span>
                             <span className="font-bold">
                               {itm?.item_name}{" "}
                               <span className="text-primary font-mono ml-1">
