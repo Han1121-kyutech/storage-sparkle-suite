@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Item } from "@/types";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +19,9 @@ interface ItemFormModalProps {
 }
 
 const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
+  const { currentUser } = useAuth();
+  const isRole2 = currentUser?.role === 2;
+
   const [itemName, setItemName] = useState("");
   const [locationName, setLocationName] = useState("");
   const [locationNo, setLocationNo] = useState("");
@@ -25,6 +29,11 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
   const [memo, setMemo] = useState("");
   const [labelNo, setLabelNo] = useState("");
   const [specifications, setSpecifications] = useState("");
+
+  // 権力者（Role 2）専用State
+  const [alertThreshold, setAlertThreshold] = useState(5);
+  const [category, setCategory] = useState("");
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -36,6 +45,8 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       setMemo(item.memo || "");
       setLabelNo(item.label_no || "");
       setSpecifications(item.specifications || "");
+      setAlertThreshold(item.alert_threshold ?? 5);
+      setCategory(item.category || "");
     } else {
       setItemName("");
       setLocationName("");
@@ -44,6 +55,8 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       setMemo("");
       setLabelNo("");
       setSpecifications("");
+      setAlertThreshold(5);
+      setCategory("");
     }
   }, [item, open]);
 
@@ -51,7 +64,7 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
     e.preventDefault();
     setIsSubmitting(true);
 
-    const itemData = {
+    const itemData: Partial<Item> = {
       item_name: itemName.trim(),
       location_name: locationName.trim(),
       location_no: locationNo.trim(),
@@ -60,6 +73,15 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       label_no: labelNo.trim(),
       specifications: specifications.trim(),
     };
+
+    // Role 2のみが閾値とカテゴリを操作可能。非Role 2の新規登録時はデフォルト値を利用
+    if (isRole2) {
+      itemData.alert_threshold = alertThreshold;
+      itemData.category = category.trim() || null;
+    } else if (!item) {
+      itemData.alert_threshold = 5;
+      itemData.category = null;
+    }
 
     try {
       let resultData: Item | null = null;
@@ -189,7 +211,7 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
                 min={0}
                 value={stockQuantity}
                 onChange={(e) => setStockQuantity(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none font-mono"
               />
             </div>
             <div className="space-y-1.5">
@@ -205,19 +227,52 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               />
             </div>
           </div>
+
+          {/* Role 2専用 特権フィールド */}
+          {isRole2 && (
+            <div className="grid grid-cols-2 gap-4 border-t border-border pt-4 mt-2">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase text-destructive">
+                  警告閾値 (Role 2限定)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  disabled={isSubmitting}
+                  value={alertThreshold}
+                  onChange={(e) => setAlertThreshold(Number(e.target.value))}
+                  className="w-full px-3 py-2 rounded-md bg-secondary/50 border border-destructive/30 text-foreground text-sm focus:ring-1 ring-destructive outline-none font-mono"
+                  placeholder="デフォルト: 5"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold uppercase text-primary">
+                  カテゴリ (Role 2限定)
+                </label>
+                <input
+                  disabled={isSubmitting}
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-secondary/50 border border-primary/30 text-foreground text-sm focus:ring-1 ring-primary outline-none"
+                  placeholder="例: 消耗品"
+                />
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2 pt-4">
             <button
               type="button"
               disabled={isSubmitting}
               onClick={onClose}
-              className="px-4 py-2 rounded-lg bg-secondary text-muted-foreground text-sm font-bold hover:bg-secondary/80"
+              className="px-4 py-2 rounded-lg bg-secondary text-muted-foreground text-sm font-bold hover:bg-secondary/80 transition-all"
             >
               キャンセル
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-6 py-2 rounded-lg bg-primary text-black text-sm font-bold hover:opacity-90 shadow-sm"
+              className="px-6 py-2 rounded-lg bg-primary text-black text-sm font-bold hover:opacity-90 shadow-sm active:scale-95 transition-all"
             >
               {isSubmitting ? "保存中..." : item ? "更新する" : "追加する"}
             </button>

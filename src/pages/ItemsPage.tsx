@@ -23,10 +23,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const getStockColorClass = (quantity: number) => {
-  if (quantity >= 15) return "text-success";
-  if (quantity >= 5) return "text-warning";
-  return "text-destructive font-black animate-pulse";
+// 動的閾値に基づくカラークラス判定（Role 2の支配ロジック）
+const getStockColorClass = (quantity: number, threshold: number = 5) => {
+  if (quantity >= threshold * 3) return "text-success"; // 緑: 閾値の3倍以上なら安全
+  if (quantity >= threshold) return "text-warning"; // 黄: 閾値以上なら注意
+  return "text-destructive font-black animate-pulse"; // 赤: 閾値未満で警告（点滅）
 };
 
 type GroupedItem = {
@@ -34,6 +35,8 @@ type GroupedItem = {
   locations: Item[];
   total_stock: number;
   effective_stock: number;
+  alert_threshold: number;
+  category: string | null;
 };
 
 const ItemsPage = () => {
@@ -189,20 +192,25 @@ const ItemsPage = () => {
       const matchesSearch =
         i.item_name.toLowerCase().includes(q) ||
         i.location_no.toLowerCase().includes(q) ||
-        (i.label_no && i.label_no.toLowerCase().includes(q));
+        (i.label_no && i.label_no.toLowerCase().includes(q)) ||
+        (i.category && i.category.toLowerCase().includes(q)); // カテゴリでの検索も可能に
       const matchesLocation =
         selectedLocation === "all" || i.location_name === selectedLocation;
       return matchesSearch && matchesLocation;
     });
+
     const groups: Record<string, GroupedItem> = {};
     filtered.forEach((i) => {
-      if (!groups[i.item_name])
+      if (!groups[i.item_name]) {
         groups[i.item_name] = {
           item_name: i.item_name,
           locations: [],
           total_stock: 0,
           effective_stock: 0,
+          alert_threshold: i.alert_threshold ?? 5,
+          category: i.category || null,
         };
+      }
       const eff = calculateEffectiveStock(i.id, i.stock_quantity);
       groups[i.item_name].locations.push(i);
       groups[i.item_name].total_stock += i.stock_quantity;
@@ -244,7 +252,7 @@ const ItemsPage = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="名前・ラベル・棚番で検索..."
+              placeholder="名前・ラベル・カテゴリ検索..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border text-sm outline-none focus:ring-1 ring-primary shadow-sm"
@@ -384,7 +392,10 @@ const ItemsPage = () => {
       <div className="grid grid-cols-1 gap-4">
         {groupedItems.map((group) => {
           const isOpen = expandedIds.has(group.item_name);
-          const effectiveColor = getStockColorClass(group.effective_stock);
+          const effectiveColor = getStockColorClass(
+            group.effective_stock,
+            group.alert_threshold,
+          );
           return (
             <div
               key={group.item_name}
@@ -402,11 +413,18 @@ const ItemsPage = () => {
               >
                 <div className="flex items-center gap-4">
                   <Package
-                    className={`h-6 w-6 ${group.effective_stock < 5 ? "text-destructive animate-pulse" : "text-primary"}`}
+                    className={`h-6 w-6 ${group.effective_stock < group.alert_threshold ? "text-destructive animate-pulse" : "text-primary"}`}
                   />
                   <div className="text-left">
-                    <div className="text-base font-black uppercase tracking-tight">
-                      {group.item_name}
+                    <div className="flex items-center gap-2 mb-0.5">
+                      {group.category && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                          {group.category}
+                        </span>
+                      )}
+                      <div className="text-base font-black uppercase tracking-tight">
+                        {group.item_name}
+                      </div>
                     </div>
                     <div className="text-[10px] text-muted-foreground font-mono">
                       計: {group.total_stock} |{" "}
@@ -498,7 +516,7 @@ const ItemsPage = () => {
                               </span>
                             </td>
                             <td
-                              className={`px-6 py-4 text-right font-mono font-bold ${getStockColorClass(eff)}`}
+                              className={`px-6 py-4 text-right font-mono font-bold ${getStockColorClass(eff, loc.alert_threshold ?? 5)}`}
                             >
                               {eff}
                             </td>

@@ -143,6 +143,7 @@ const RequestsPage = () => {
       const item = items.find((i) => i.id === req.item_id);
       const itemName = item?.item_name ?? "";
       const itemLabel = item?.label_no ?? "";
+      const itemCategory = item?.category ?? "";
       const userName =
         users.find((u) => String(u.id) === String(req.user_id))?.user_name ??
         "";
@@ -152,6 +153,7 @@ const RequestsPage = () => {
       return (
         itemName.toLowerCase().includes(searchLower) ||
         itemLabel.toLowerCase().includes(searchLower) ||
+        itemCategory.toLowerCase().includes(searchLower) ||
         userName.toLowerCase().includes(searchLower) ||
         typeName.toLowerCase().includes(searchLower) ||
         (req.memo && req.memo.toLowerCase().includes(searchLower))
@@ -363,8 +365,15 @@ const RequestsPage = () => {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-bold text-foreground">
-                        {item?.item_name || "不明"}
+                      <div className="flex items-center gap-2 mb-0.5">
+                        {item?.category && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                            {item.category}
+                          </span>
+                        )}
+                        <div className="font-bold text-foreground">
+                          {item?.item_name || "不明"}
+                        </div>
                       </div>
                       <div className="text-[10px] flex items-center gap-2 mt-1">
                         {item?.label_no && (
@@ -448,8 +457,15 @@ const RequestsPage = () => {
                 </div>
                 <div className="flex justify-between items-start gap-4">
                   <div className="space-y-1.5 flex-1">
-                    <div className="font-bold text-foreground text-sm line-clamp-1">
-                      {item?.item_name || "不明"}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {item?.category && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                          {item.category}
+                        </span>
+                      )}
+                      <div className="font-bold text-foreground text-sm line-clamp-1">
+                        {item?.item_name || "不明"}
+                      </div>
                     </div>
                     <div className="text-[10px] flex items-center gap-2 flex-wrap">
                       {item?.label_no && (
@@ -521,6 +537,11 @@ const RequestsPage = () => {
         >
           {eff > 0 ? `残 ${eff}` : "在庫切"}
         </span>
+        {item.category && (
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0 hidden sm:inline-block">
+            {item.category}
+          </span>
+        )}
         <span className="font-bold text-sm truncate">{item.item_name}</span>
         {item.label_no && (
           <span className="text-[10px] font-mono bg-secondary px-1 rounded text-muted-foreground shrink-0">
@@ -538,6 +559,7 @@ const RequestsPage = () => {
       (i) =>
         i.item_name.toLowerCase().includes(q) ||
         (i.label_no && i.label_no.toLowerCase().includes(q)) ||
+        (i.category && i.category.toLowerCase().includes(q)) ||
         i.location_name.toLowerCase().includes(q),
     );
   }, [items, itemSelectSearch]);
@@ -558,7 +580,7 @@ const RequestsPage = () => {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="名前・ラベル・理由で検索..."
+              placeholder="名前・ラベル・カテゴリ検索..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all shadow-sm"
@@ -616,7 +638,7 @@ const RequestsPage = () => {
                         <input
                           type="text"
                           autoFocus
-                          placeholder="物品名・ラベルで絞り込み..."
+                          placeholder="物品名・ラベル・カテゴリで検索..."
                           value={itemSelectSearch}
                           onChange={(e) => setItemSelectSearch(e.target.value)}
                           className="w-full pl-7 pr-2 py-2 rounded-lg bg-card border border-border text-xs outline-none focus:ring-1 ring-primary"
@@ -648,6 +670,11 @@ const RequestsPage = () => {
                             >
                               <div className="flex flex-col gap-1 min-w-0 pr-3">
                                 <div className="flex items-center gap-2">
+                                  {item.category && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                      {item.category}
+                                    </span>
+                                  )}
                                   <span className="font-bold text-sm truncate">
                                     {item.item_name}
                                   </span>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom"; // ルーティング用フックを追加
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { Item, Request } from "@/types";
@@ -10,17 +10,17 @@ import {
   CheckCircle,
   Loader2,
   ChevronRight,
+  MapPin,
 } from "lucide-react";
 import { toast } from "sonner";
 
 const DashboardPage = () => {
   const { currentUser } = useAuth();
-  const navigate = useNavigate(); // ナビゲーションの初期化
+  const navigate = useNavigate();
   const [items, setItems] = useState<Item[]>([]);
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // データベースから実際の情報を同期する
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
@@ -44,36 +44,37 @@ const DashboardPage = () => {
     fetchDashboardData();
   }, []);
 
-  // --- 権限に基づく表示の振り分けロジック ---
   const role = currentUser?.role ?? 0;
-  const isAdmin = role >= 1; // 1(管理者) または 2(最高管理者)
+  const isAdmin = role >= 1;
 
-  // 管理者以上は全ての申請を、一般ユーザーは自分の申請だけをカウントする
   const targetRequests = isAdmin
     ? requests
     : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
-  const lowStockItems = items.filter((i) => i.stock_quantity < 10);
+  // ★ハードコードを排除し、各アイテムの個別閾値（未設定時は5）を基準に判定する
+  const lowStockItems = items.filter(
+    (i) => i.stock_quantity < (i.alert_threshold ?? 5),
+  );
+
   const pendingRequests = targetRequests.filter((r) => r.status === "pending");
   const approvedRequests = targetRequests.filter(
     (r) => r.status === "approved",
   );
 
-  // パネルの定義に遷移先(path)を追加
   const stats = [
     {
       label: "登録物品数",
       value: items.length,
       icon: Package,
       color: "text-info",
-      path: "/items", // 物品一覧へ
+      path: "/items",
     },
     {
       label: isAdmin ? "全体の未承認申請" : "あなたの未承認申請",
       value: pendingRequests.length,
       icon: ClipboardList,
       color: "text-primary",
-      path: isAdmin ? "/admin" : "/requests", // 管理者は管理パネル、一般は申請画面へ
+      path: isAdmin ? "/admin" : "/requests",
     },
     {
       label: "在庫少アラート",
@@ -134,17 +135,16 @@ const DashboardPage = () => {
         ))}
       </div>
 
-      {/* 在庫少アラート */}
       {lowStockItems.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <AlertTriangle className="h-5 w-5 text-destructive animate-pulse" />
               在庫が少ない物品
             </h3>
             <button
               onClick={() => navigate(isAdmin ? "/admin" : "/items")}
-              className="text-xs font-bold text-muted-foreground hover:text-primary flex items-center gap-1"
+              className="text-xs font-bold text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
             >
               詳細を見る <ChevronRight className="h-3 w-3" />
             </button>
@@ -154,9 +154,10 @@ const DashboardPage = () => {
               <table className="w-full text-sm text-left">
                 <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
                   <tr>
-                    <th className="px-4 py-3">物品名</th>
+                    <th className="px-4 py-3 w-16">ID</th>
+                    <th className="px-4 py-3">物品名 / ラベル</th>
                     <th className="px-4 py-3">保管場所</th>
-                    <th className="px-4 py-3 text-right">在庫数</th>
+                    <th className="px-4 py-3 text-right">在庫数 / 閾値</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
@@ -166,14 +167,46 @@ const DashboardPage = () => {
                       onClick={() => navigate(isAdmin ? "/admin" : "/items")}
                       className="hover:bg-secondary/30 transition-colors cursor-pointer group"
                     >
-                      <td className="px-4 py-3 text-foreground font-bold group-hover:text-primary transition-colors">
-                        {item.item_name}
+                      <td className="px-4 py-3 font-mono text-[10px] opacity-50">
+                        #{item.id}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {item.location_name} ({item.location_no})
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          {item.category && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
+                              {item.category}
+                            </span>
+                          )}
+                          <span className="font-bold text-foreground group-hover:text-primary transition-colors">
+                            {item.item_name}
+                          </span>
+                        </div>
+                        <div className="text-[10px] mt-1 flex items-center gap-2">
+                          {item.label_no && (
+                            <span className="bg-secondary px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground">
+                              {item.label_no}
+                            </span>
+                          )}
+                          <span className="italic text-muted-foreground">
+                            {item.specifications || "-"}
+                          </span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-destructive font-black">
-                        {item.stock_quantity}
+                      <td className="px-4 py-3 text-xs">
+                        <div className="flex items-center gap-1 opacity-80">
+                          <MapPin className="h-3 w-3" /> {item.location_name}
+                        </div>
+                        <div className="font-mono text-[10px] bg-secondary/50 inline-block px-1 rounded mt-1 opacity-70">
+                          #{item.location_no}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="font-mono text-lg text-destructive font-black">
+                          {item.stock_quantity}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground ml-1">
+                          / {item.alert_threshold ?? 5}
+                        </span>
                       </td>
                     </tr>
                   ))}
