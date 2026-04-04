@@ -3,9 +3,9 @@ compatibility_date = "2024-04-02"
 pages_build_output_dir = "dist"
 
 [vars]
-INVENTORY_WEBHOOK_URL=https://discordapp.com/api/webhooks/1489841659767296202/iRtNboWF3YV5qzGt_ZLKdC8DOxlwkpD9HIG7tNEX3JGJaLCuLt-eY-sIgK8OG1RgpxAq
-REQUEST_WEBHOOK_URLhttps://discordapp.com/api/webhooks/1489841951867011293/Sa1mOsLWLKsv8AazlO4DnghON7OuIjT3mQfovTnZ2uGmlGYsMVx-jkXzFxu9pfOdrqs4
+INVENTORY_WEBHOOK_URL="https://discordapp.com/api/webhooks/1489841659767296202/iRtNboWF3YV5qzGt_ZLKdC8DOxlwkpD9HIG7tNEX3JGJaLCuLt-eY-sIgK8OG1RgpxAq"
+REQUEST_WEBHOOK_URL="https://discordapp.com/api/webhooks/1489841951867011293/Sa1mOsLWLKsv8AazlO4DnghON7OuIjT3mQfovTnZ2uGmlGYsMVx-jkXzFxu9pfOdrqs4"
 
 [env.preview.vars]
-INVENTORY_WEBHOOK_URL=https://discord.com/api/webhooks/1489647679419187260/xeek1RpDUGyeDeFPU1a-1hoJ0_sPY_6CeakFXyDKzrH6nJvReSJQVTdcFuTH1peQvlwl
-REQUEST_WEBHOOK_URL=https://discord.com/api/webhooks/1489650883288629541/yV5UbvjFMPoChTiINGmTs3a0avk7-Qol60_nq_Ucis3Wqfvu872LPueOLCldyoOsaiT1
+INVENTORY_WEBHOOK_URL="https://discord.com/api/webhooks/1489647679419187260/xeek1RpDUGyeDeFPU1a-1hoJ0_sPY_6CeakFXyDKzrH6nJvReSJQVTdcFuTH1peQvlwl"
+REQUEST_WEBHOOK_URL="https://discord.com/api/webhooks/1489650883288629541/yV5UbvjFMPoChTiINGmTs3a0avk7-Qol60_nq_Ucis3Wqfvu872LPueOLCldyoOsaiT1"
