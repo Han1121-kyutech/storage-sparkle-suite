@@ -124,7 +124,7 @@ const ItemsPage = () => {
 
       // Discord通知送信
       await sendInventoryNotification(
-        `✨ **新規物品登録 (簡易登録)**\n名前: ${newItem.item_name}\n保管場所: ${newItem.location_name}\n棚番: ${newItem.location_no}\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name}`,
+        `✨ **新規物品登録**\n名前: ${newItem.item_name}\n保管場所: ${newItem.location_name}\n棚番: ${newItem.location_no}\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name}`,
       );
 
       toast.success("登録完了");
