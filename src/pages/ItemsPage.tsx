@@ -30,6 +30,12 @@ const getStockColorClass = (quantity: number, threshold: number = 5) => {
   return "text-destructive font-black animate-pulse";
 };
 
+const typeLabel: Record<string, string> = {
+  checkout: "貸出",
+  consume: "消費",
+  dispose: "廃棄",
+};
+
 type GroupedItem = {
   item_name: string;
   locations: Item[];
@@ -58,6 +64,12 @@ const ItemsPage = () => {
   const [reservingItems, setReservingItems] = useState<Item[]>([]);
   const [resDate, setResDate] = useState("");
   const [resQtyMap, setResQtyMap] = useState<Record<number, number>>({});
+  // 追加: 個別種別・備考用のState
+  const [resTypeMap, setResTypeMap] = useState<
+    Record<number, Request["request_type"]>
+  >({});
+  const [resMemoMap, setResMemoMap] = useState<Record<number, string>>({});
+
   const [submitting, setSubmitting] = useState(false);
 
   const [newItem, setNewItem] = useState({
@@ -113,8 +125,6 @@ const ItemsPage = () => {
     });
   };
 
-  // ★ 物品の新規登録 ＆ 通知ロジック
-  // ★ 物品の新規登録 ＆ 通知ロジック
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -122,14 +132,12 @@ const ItemsPage = () => {
       const { error } = await supabase.from("items").insert([newItem]);
       if (error) throw error;
 
-      // Discord通知送信
       await sendInventoryNotification(
         `✨ **新規物品登録**\n名前: ${newItem.item_name}\n保管場所: ${newItem.location_name}\n棚番: ${newItem.location_no}\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name}`,
       );
 
       toast.success("登録完了");
 
-      // --- ここから追加：入力欄をクリアする ---
       setNewItem({
         item_name: "",
         label_no: "",
@@ -139,9 +147,7 @@ const ItemsPage = () => {
         stock_quantity: 0,
         memo: "",
       });
-      // フォームを閉じる（モバイル用）
       if (window.innerWidth <= 768) setIsFormOpen(false);
-      // ---------------------------------------
 
       fetchData();
     } catch (e: any) {
@@ -154,13 +160,24 @@ const ItemsPage = () => {
   const openReserveModal = (itemsToReserve: Item[]) => {
     setReservingItems(itemsToReserve);
     const initialQtys: Record<number, number> = {};
-    itemsToReserve.forEach((i) => (initialQtys[i.id] = 1));
+    const initialTypes: Record<number, Request["request_type"]> = {};
+    const initialMemos: Record<number, string> = {};
+
+    itemsToReserve.forEach((i) => {
+      initialQtys[i.id] = 1;
+      initialTypes[i.id] = "checkout";
+      initialMemos[i.id] = "";
+    });
+
     setResQtyMap(initialQtys);
-    setResDate("");
+    setResTypeMap(initialTypes);
+    setResMemoMap(initialMemos);
+    setResDate(""); // 種別が混在するため日付は任意に変更
   };
 
   const handleReserveSubmit = async () => {
-    if (reservingItems.length === 0 || !resDate) return;
+    if (reservingItems.length === 0) return;
+
     for (const item of reservingItems) {
       const eff = calculateEffectiveStock(item.id, item.stock_quantity);
       const qty = resQtyMap[item.id] || 0;
@@ -172,35 +189,48 @@ const ItemsPage = () => {
         toast.error(`在庫不足: ${item.item_name}`);
         return;
       }
+      if (resTypeMap[item.id] === "dispose" && !resMemoMap[item.id].trim()) {
+        toast.error(`廃棄理由は必須です: ${item.item_name}`);
+        return;
+      }
     }
+
     setSubmitting(true);
     try {
-      const [y, m, d] = resDate.split("-");
-      const dateStr = `${y}年${m}月${d}日`;
-      const insertData = reservingItems.map((item) => ({
-        item_id: item.id,
-        user_id: currentUser?.id,
-        request_quantity: resQtyMap[item.id],
-        request_type: "checkout",
-        status: "pending",
-        scheduled_date: resDate,
-        memo: `【予約】使用予定日：${dateStr}`,
-      }));
+      const dateStr = resDate ? resDate.split("-").join("/") : "即時";
+
+      const insertData = reservingItems.map((item) => {
+        let finalMemo = resMemoMap[item.id].trim();
+        if (resDate) {
+          finalMemo = `【予定日:${dateStr}】${finalMemo ? ` / ${finalMemo}` : ""}`;
+        }
+
+        return {
+          item_id: item.id,
+          user_id: currentUser?.id,
+          request_quantity: resQtyMap[item.id],
+          request_type: resTypeMap[item.id],
+          status: "pending",
+          scheduled_date: resDate || null,
+          memo: finalMemo,
+        };
+      });
+
       const { error } = await supabase.from("requests").insert(insertData);
       if (error) throw error;
 
-      // ★ Discordへの詳細通知（申請セクションへ）
       const summary = reservingItems
         .map(
-          (i) => `・${i.item_name} (x${resQtyMap[i.id]}) [${i.location_name}]`,
+          (i) =>
+            `・[${typeLabel[resTypeMap[i.id] || "checkout"]}] ${i.item_name} (x${resQtyMap[i.id]}) [${i.location_name}]`,
         )
         .join("\n");
 
       await sendRequestNotification(
-        `📅 **新規予約申請 (${reservingItems.length}件)**\n予定日: ${dateStr}\n予約者: ${currentUser?.user_name}\n\n【予約内容】\n${summary}`,
+        `📝 **一括申請 (${reservingItems.length}件)**\n予定日: ${dateStr}\n申請者: ${currentUser?.user_name}\n\n【内容】\n${summary}`,
       );
 
-      toast.success("予約申請完了");
+      toast.success("一括申請を完了しました");
       setReservingItems([]);
       setSelectedItemIds(new Set());
       setIsBulkMode(false);
@@ -272,7 +302,7 @@ const ItemsPage = () => {
             className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold shadow-sm ${isBulkMode ? "bg-primary text-black border-primary ring-2 ring-primary/20" : "bg-card border-border text-foreground hover:bg-secondary"}`}
           >
             <ListChecks className="h-4 w-4" />{" "}
-            {isBulkMode ? "モード解除" : "一括予約申請"}
+            {isBulkMode ? "モード解除" : "一括申請を選択"}
           </button>
           <div className="relative flex-1 md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -332,8 +362,8 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
-                  value={newItem.item_name} // ステートと同期
-                  disabled={submitting} // 送信中は触らせない
+                  value={newItem.item_name}
+                  disabled={submitting}
                   placeholder="物品の名称"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -347,7 +377,8 @@ const ItemsPage = () => {
                 </label>
                 <input
                   type="text"
-                  value={newItem.label_no} // ← これを追加
+                  value={newItem.label_no}
+                  disabled={submitting}
                   placeholder="管理番号があれば入力"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -362,7 +393,8 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
-                  value={newItem.location_name} // ← これを追加
+                  value={newItem.location_name}
+                  disabled={submitting}
                   placeholder="倉庫名など"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -377,7 +409,8 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
-                  value={newItem.location_no} // ← これを追加
+                  value={newItem.location_no}
+                  disabled={submitting}
                   placeholder="配置エリア"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -393,9 +426,10 @@ const ItemsPage = () => {
                   type="number"
                   required
                   min={0}
+                  disabled={submitting}
                   value={
                     newItem.stock_quantity === 0 ? "" : newItem.stock_quantity
-                  } // 0の時に空にする工夫
+                  }
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all font-mono"
                   onChange={(e) =>
                     setNewItem({
@@ -411,7 +445,8 @@ const ItemsPage = () => {
                 </label>
                 <input
                   type="text"
-                  value={newItem.specifications} // ← これを追加
+                  value={newItem.specifications}
+                  disabled={submitting}
                   placeholder="サイズ、色、用途など"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -572,7 +607,7 @@ const ItemsPage = () => {
                                   disabled={!isSelectable}
                                   className={`text-[10px] font-black px-4 py-1.5 rounded-lg transition-all shadow-sm ${isSelectable ? "bg-primary text-black hover:opacity-90 active:scale-95" : "bg-secondary text-muted-foreground opacity-50 cursor-not-allowed"}`}
                                 >
-                                  {isSelectable ? "予約申請" : "在庫なし"}
+                                  {isSelectable ? "申請を作成" : "在庫なし"}
                                 </button>
                               </td>
                             )}
@@ -608,7 +643,7 @@ const ItemsPage = () => {
               }
               className="flex-1 bg-primary text-black font-black py-3.5 rounded-xl shadow-lg hover:opacity-95 active:scale-[0.98] transition-all text-sm uppercase tracking-tighter"
             >
-              一括予約を確定する
+              一括申請を確定する
             </button>
           </div>
         </div>
@@ -616,11 +651,10 @@ const ItemsPage = () => {
 
       {reservingItems.length > 0 && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-card w-full max-w-md rounded-3xl p-6 border border-border shadow-2xl space-y-6 max-h-[85vh] overflow-y-auto">
+          <div className="bg-card w-full max-w-lg rounded-3xl p-6 border border-border shadow-2xl space-y-6 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center">
               <h3 className="font-black text-lg flex items-center gap-2 text-foreground">
-                <CalendarDays className="h-5 w-5 text-primary" />{" "}
-                予約申請フォーム
+                <CalendarDays className="h-5 w-5 text-primary" /> 申請フォーム
               </h3>
               <button
                 onClick={() => setReservingItems([])}
@@ -631,12 +665,12 @@ const ItemsPage = () => {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
-                使用予定日 (必須)
+                共通の使用予定日 (任意)
               </label>
               <input
                 type="date"
                 max="9999-12-31"
-                className="w-full bg-secondary/30 p-4 rounded-2xl outline-none border border-border focus:ring-1 ring-primary font-black shadow-inner text-sm"
+                className="w-full bg-secondary/30 p-3 rounded-2xl outline-none border border-border focus:ring-1 ring-primary font-black shadow-inner text-sm"
                 value={resDate}
                 onChange={(e) => setResDate(e.target.value)}
                 min={new Date().toISOString().split("T")[0]}
@@ -644,7 +678,7 @@ const ItemsPage = () => {
             </div>
             <div className="space-y-3 pt-2">
               <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
-                予約数量の調整
+                個別設定 (数量・種別・備考)
               </label>
               <div className="space-y-2.5">
                 {reservingItems.map((item) => {
@@ -653,40 +687,79 @@ const ItemsPage = () => {
                     item.stock_quantity,
                   );
                   const currentVal = resQtyMap[item.id];
+                  const currentType = resTypeMap[item.id] || "checkout";
+                  const currentMemo = resMemoMap[item.id] || "";
+
                   return (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-4 bg-secondary/20 rounded-2xl border border-border/50 shadow-sm"
+                      className="flex flex-col gap-3 p-4 bg-secondary/20 rounded-2xl border border-border/50 shadow-sm"
                     >
-                      <div className="flex-1 pr-4 min-w-0">
-                        <div className="text-sm font-black truncate text-foreground">
-                          {item.item_name}
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 pr-4 min-w-0">
+                          <div className="text-sm font-black truncate text-foreground">
+                            {item.item_name}
+                          </div>
+                          <div className="text-[9px] opacity-40 uppercase font-bold truncate">
+                            {item.label_no || "NO LABEL"} | {item.location_name}
+                          </div>
                         </div>
-                        <div className="text-[9px] opacity-40 uppercase font-bold truncate">
-                          {item.label_no || "NO LABEL"} | {item.location_name}
+                        <div className="flex items-center gap-3 shrink-0">
+                          <input
+                            type="number"
+                            min={1}
+                            max={eff}
+                            className="w-16 bg-card border border-border rounded-xl p-2 text-center text-sm font-black focus:ring-1 ring-primary outline-none shadow-sm"
+                            value={currentVal === 0 ? "" : currentVal}
+                            onChange={(e) =>
+                              setResQtyMap({
+                                ...resQtyMap,
+                                [item.id]:
+                                  e.target.value === ""
+                                    ? 0
+                                    : Number(e.target.value),
+                              })
+                            }
+                            onFocus={(e) => e.target.select()}
+                          />
+                          <span className="text-[10px] font-black opacity-20">
+                            / {eff}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 shrink-0">
-                        <input
-                          type="number"
-                          min={1}
-                          max={eff}
-                          className="w-20 bg-card border border-border rounded-xl p-2.5 text-center text-sm font-black focus:ring-1 ring-primary outline-none shadow-sm"
-                          value={currentVal === 0 ? "" : currentVal}
+
+                      <div className="flex gap-2">
+                        <select
+                          className="w-28 bg-card border border-border rounded-xl p-2 text-xs font-bold outline-none focus:ring-1 ring-primary shadow-sm"
+                          value={currentType}
                           onChange={(e) =>
-                            setResQtyMap({
-                              ...resQtyMap,
-                              [item.id]:
-                                e.target.value === ""
-                                  ? 0
-                                  : Number(e.target.value),
+                            setResTypeMap({
+                              ...resTypeMap,
+                              [item.id]: e.target
+                                .value as Request["request_type"],
                             })
                           }
-                          onFocus={(e) => e.target.select()}
+                        >
+                          <option value="checkout">貸出/予約</option>
+                          <option value="consume">消費</option>
+                          <option value="dispose">廃棄</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder={
+                            currentType === "dispose"
+                              ? "廃棄理由(必須)"
+                              : "個別備考..."
+                          }
+                          className="flex-1 bg-card border border-border rounded-xl p-2 text-xs outline-none focus:ring-1 ring-primary shadow-sm"
+                          value={currentMemo}
+                          onChange={(e) =>
+                            setResMemoMap({
+                              ...resMemoMap,
+                              [item.id]: e.target.value,
+                            })
+                          }
                         />
-                        <span className="text-[10px] font-black opacity-20">
-                          / {eff}
-                        </span>
                       </div>
                     </div>
                   );
@@ -695,13 +768,13 @@ const ItemsPage = () => {
             </div>
             <button
               onClick={handleReserveSubmit}
-              disabled={submitting || !resDate}
+              disabled={submitting}
               className="w-full bg-primary text-black font-black py-4 rounded-2xl shadow-xl hover:opacity-95 active:scale-[0.99] transition-all mt-4 disabled:opacity-30 uppercase tracking-tighter"
             >
               {submitting ? (
                 <Loader2 className="h-6 w-6 animate-spin mx-auto" />
               ) : (
-                "この内容で予約を申請する"
+                "この内容で申請を送信する"
               )}
             </button>
           </div>

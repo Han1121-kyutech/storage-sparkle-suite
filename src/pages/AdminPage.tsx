@@ -78,14 +78,14 @@ const statusStyle: Record<Request["status"], string> = {
   returned: "bg-info/20 text-info border-info/20",
 };
 
-// 追加: 申請種別のラベル定義
+// 申請種別のラベル定義
 const typeLabel: Record<string, string> = {
   checkout: "貸出",
   consume: "消費",
   dispose: "廃棄",
 };
 
-// 追加: 申請種別の視覚スタイル
+// 申請種別の視覚スタイル
 const typeStyle: Record<string, string> = {
   checkout: "bg-blue-500/10 text-blue-500 border-blue-500/20",
   consume: "bg-orange-500/10 text-orange-500 border-orange-500/20",
@@ -143,7 +143,6 @@ const AdminPage = () => {
   const [editingItem, setEditingItem] = useState<Item | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Item | null>(null);
 
-  // Role 2専用のカテゴリ支配・閾値管理State
   const [isCategoryMode, setIsCategoryMode] = useState(false);
   const [selectedGroupNames, setSelectedGroupNames] = useState<Set<string>>(
     new Set(),
@@ -369,7 +368,7 @@ const AdminPage = () => {
     g.requests.every((r) => r.status !== "pending"),
   );
 
-  // ★ 申請ステータスの更新 ＆ 通知ロジック
+  // グループ全体の一括更新
   const updateBulkStatus = async (
     group: RequestGroup,
     s: Request["status"],
@@ -402,7 +401,6 @@ const AdminPage = () => {
         await supabase.from("requests").update({ status: s }).eq("id", r.id);
       }
 
-      // ★ ここでDiscordへステータス更新を通知
       let statusText = "";
       let icon = "";
       if (s === "approved") {
@@ -441,6 +439,65 @@ const AdminPage = () => {
     }
   };
 
+  // 個別の申請更新
+  const updateSingleStatus = async (req: Request, s: Request["status"]) => {
+    try {
+      setLoading(true);
+      const i = items.find((item) => item.id === req.item_id);
+      if (!i) {
+        toast.error("対象の物品が見つかりません");
+        return;
+      }
+
+      if (s === "approved" && i.stock_quantity < req.request_quantity) {
+        toast.error(`在庫不足: ${i.item_name}`);
+        return;
+      }
+
+      if (s === "approved") {
+        await supabase
+          .from("items")
+          .update({ stock_quantity: i.stock_quantity - req.request_quantity })
+          .eq("id", i.id);
+      } else if (s === "returned") {
+        await supabase
+          .from("items")
+          .update({ stock_quantity: i.stock_quantity + req.request_quantity })
+          .eq("id", i.id);
+      }
+      await supabase.from("requests").update({ status: s }).eq("id", req.id);
+
+      let statusText = "";
+      let icon = "";
+      if (s === "approved") {
+        statusText = "承認";
+        icon = "✅";
+      } else if (s === "rejected") {
+        statusText = "却下";
+        icon = "❌";
+      } else if (s === "returned") {
+        statusText = "返却完了";
+        icon = "🔙";
+      }
+
+      if (statusText) {
+        const targetUser =
+          users.find((u) => String(u.id) === String(req.user_id))?.user_name ||
+          "不明";
+        await sendRequestNotification(
+          `${icon} **個別ステータス更新: ${statusText}**\n対象物品: ${i.item_name}\n申請者: ${targetUser}\n処理者: ${currentUser?.user_name}`,
+        );
+      }
+
+      toast.success(`${i.item_name}のステータスを更新しました`);
+      reloadAll();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const toggleGroup = (gid: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
@@ -466,6 +523,10 @@ const AdminPage = () => {
             const user = users.find((u) => String(u.id) === String(g.user_id));
             const isExpanded = expandedGroups.has(g.groupId);
             const isPending = g.requests.some((r) => r.status === "pending");
+            const hasApproveCheckout = g.requests.some(
+              (r) => r.status === "approved" && r.request_type === "checkout",
+            );
+
             return (
               <React.Fragment key={g.groupId}>
                 <tr
@@ -489,16 +550,14 @@ const AdminPage = () => {
                   <td className="px-4 py-4 font-bold">
                     {user?.user_name || "不明"}
                   </td>
-                  {/* // renderRequestTable 内の修正（g.requests.map 部分） */}
                   <td className="px-4 py-4">
                     {g.isBulk ? (
                       <span className="text-xs italic text-muted-foreground flex items-center gap-2 font-bold">
-                        <Layers className="h-3 w-3 text-primary" /> 一括予約申請
-                        ({g.requests.length}件)
+                        <Layers className="h-3 w-3 text-primary" /> 一括申請 (
+                        {g.requests.length}件)
                       </span>
                     ) : (
                       <div className="flex items-center gap-2">
-                        {/* ★ ここに種別バッジを追加 */}
                         <span
                           className={`px-2 py-0.5 rounded border text-[9px] font-bold ${typeStyle[g.requests[0].request_type || "checkout"]}`}
                         >
@@ -517,45 +576,52 @@ const AdminPage = () => {
                     )}
                   </td>
                   <td className="px-4 py-4 text-center">
-                    {isPending ? (
-                      <div
-                        className="flex justify-center gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <button
-                          onClick={() => updateBulkStatus(g, "approved")}
-                          className="px-4 py-1.5 bg-success text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                        >
-                          一括承認
-                        </button>
-                        <button
-                          onClick={() => updateBulkStatus(g, "rejected")}
-                          className="px-3 py-1.5 bg-destructive text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                        >
-                          却下
-                        </button>
-                      </div>
-                    ) : g.requests.some(
-                        (r) =>
-                          r.status === "approved" &&
-                          r.request_type === "checkout",
-                      ) ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          updateBulkStatus(g, "returned");
-                        }}
-                        className="px-4 py-1.5 bg-info text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                      >
-                        一括返却
-                      </button>
-                    ) : (
-                      <span
-                        className={`px-2 py-1 rounded border text-[9px] font-black uppercase ${statusStyle[g.requests[0].status]}`}
-                      >
-                        {statusLabel[g.requests[0].status]}
-                      </span>
-                    )}
+                    <div
+                      className="flex justify-center gap-2 items-center"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {isPending && (
+                        <>
+                          {g.isBulk && (
+                            <span className="text-[9px] font-bold text-muted-foreground mr-1">
+                              一括操作:
+                            </span>
+                          )}
+                          <button
+                            onClick={() => updateBulkStatus(g, "approved")}
+                            className="px-4 py-1 bg-success text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
+                          >
+                            承認
+                          </button>
+                          <button
+                            onClick={() => updateBulkStatus(g, "rejected")}
+                            className="px-3 py-1 bg-destructive text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
+                          >
+                            却下
+                          </button>
+                        </>
+                      )}
+                      {!isPending && hasApproveCheckout && (
+                        <>
+                          {g.isBulk && (
+                            <span className="text-[9px] font-bold text-muted-foreground mr-1">
+                              一括操作:
+                            </span>
+                          )}
+                          <button
+                            onClick={() => updateBulkStatus(g, "returned")}
+                            className="px-4 py-1 bg-info text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
+                          >
+                            返却
+                          </button>
+                        </>
+                      )}
+                      {!isPending && !hasApproveCheckout && (
+                        <span className="px-2 py-1 rounded border text-[9px] font-black uppercase bg-secondary text-muted-foreground">
+                          処理完了
+                        </span>
+                      )}
+                    </div>
                   </td>
                 </tr>
                 {isExpanded &&
@@ -569,8 +635,7 @@ const AdminPage = () => {
                         </td>
                         <td className="px-4 py-2"></td>
                         <td className="px-4 py-2 border-l-2 border-primary/20">
-                          <div className="flex items-center gap-4">
-                            {/* ★ ここに種別バッジを追加 */}
+                          <div className="flex items-center gap-3">
                             <span
                               className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${typeStyle[r.request_type || "checkout"]}`}
                             >
@@ -583,21 +648,56 @@ const AdminPage = () => {
                               </span>
                             </span>
                             <span className="text-[10px] italic opacity-60">
-                              ラベル: {itm?.label_no || "-"} | 規格:{" "}
-                              {itm?.specifications || "-"}
+                              (保管: {itm?.location_name})
                             </span>
                           </div>
                           <div className="text-[10px] text-muted-foreground mt-1">
                             備考: {r.memo || "-"}
                           </div>
-                          {r.scheduled_date && (
-                            <div className="text-[9px] text-primary flex items-center gap-1 mt-0.5 font-bold">
-                              <CalendarDays className="h-3 w-3" /> 予約日:{" "}
-                              {r.scheduled_date}
-                            </div>
-                          )}
                         </td>
-                        <td className="px-4 py-2"></td>
+                        <td className="px-4 py-2 text-center border-l border-border/10">
+                          <div className="flex justify-center gap-1">
+                            {r.status === "pending" ? (
+                              <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateSingleStatus(r, "approved");
+                                  }}
+                                  className="px-2.5 py-1 bg-success/20 text-success border border-success/30 hover:bg-success hover:text-white rounded text-[10px] font-black transition-all"
+                                >
+                                  個別承認
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateSingleStatus(r, "rejected");
+                                  }}
+                                  className="px-2.5 py-1 bg-destructive/20 text-destructive border border-destructive/30 hover:bg-destructive hover:text-white rounded text-[10px] font-black transition-all"
+                                >
+                                  却下
+                                </button>
+                              </>
+                            ) : r.status === "approved" &&
+                              r.request_type === "checkout" ? (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateSingleStatus(r, "returned");
+                                }}
+                                className="px-2.5 py-1 bg-info/20 text-info border border-info/30 hover:bg-info hover:text-white rounded text-[10px] font-black transition-all"
+                              >
+                                個別返却
+                              </button>
+                            ) : (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${statusStyle[r.status]}`}
+                              >
+                                {statusLabel[r.status]}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -1030,7 +1130,6 @@ const AdminPage = () => {
         item={editingItem}
       />
 
-      {/* ★ 物品削除とDiscord通知の実装 ★ */}
       <DeleteConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -1038,7 +1137,6 @@ const AdminPage = () => {
           if (!deleteTarget) return;
           await supabase.from("items").delete().eq("id", deleteTarget.id);
 
-          // Discordへ削除通知を送信
           await sendInventoryNotification(
             `🗑️ **物品削除**\n名前: ${deleteTarget.item_name}\n保管場所: ${deleteTarget.location_name}\nこの物品はシステムから完全に削除されました。`,
           );

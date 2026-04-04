@@ -19,6 +19,8 @@ import {
   FileText,
   CalendarDays,
   MapPin,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { toast } from "sonner";
 import { sendRequestNotification } from "@/utils/notificationUtils";
@@ -72,12 +74,14 @@ const RequestsPage = () => {
   const [isPendingOpen, setIsPendingOpen] = useState(true);
   const [isProcessedOpen, setIsProcessedOpen] = useState(false);
 
-  const [selectedItemId, setSelectedItemId] = useState<number>(0);
-  const [requestType, setRequestType] =
-    useState<Request["request_type"]>("checkout");
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [quantity, setQuantity] = useState<number | "">(1);
-  const [memo, setMemo] = useState("");
+  // 一括申請用のState
+  const [selectedItems, setSelectedItems] = useState<Item[]>([]);
+  const [resDate, setResDate] = useState("");
+  const [resQtyMap, setResQtyMap] = useState<Record<number, number>>({});
+  const [resTypeMap, setResTypeMap] = useState<
+    Record<number, Request["request_type"]>
+  >({});
+  const [resMemoMap, setResMemoMap] = useState<Record<number, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
   const [isItemSelectOpen, setIsItemSelectOpen] = useState(false);
@@ -100,10 +104,6 @@ const RequestsPage = () => {
       setRequests(reqRes.data || []);
       setItems(itemRes.data || []);
       setUsers(userRes.data || []);
-
-      if (itemRes.data?.length > 0 && selectedItemId === 0) {
-        setSelectedItemId(itemRes.data[0].id);
-      }
     } catch (error: any) {
       toast.error("同期失敗: " + error.message);
     } finally {
@@ -131,6 +131,27 @@ const RequestsPage = () => {
       )
       .reduce((sum, r) => sum + r.request_quantity, 0);
     return Math.max(0, currentStock - reservedSum);
+  };
+
+  const toggleItemSelection = (item: Item) => {
+    const isSelected = selectedItems.some((i) => i.id === item.id);
+    if (isSelected) {
+      setSelectedItems(selectedItems.filter((i) => i.id !== item.id));
+      const newQtyMap = { ...resQtyMap };
+      delete newQtyMap[item.id];
+      const newTypeMap = { ...resTypeMap };
+      delete newTypeMap[item.id];
+      const newMemoMap = { ...resMemoMap };
+      delete newMemoMap[item.id];
+      setResQtyMap(newQtyMap);
+      setResTypeMap(newTypeMap);
+      setResMemoMap(newMemoMap);
+    } else {
+      setSelectedItems([...selectedItems, item]);
+      setResQtyMap({ ...resQtyMap, [item.id]: 1 });
+      setResTypeMap({ ...resTypeMap, [item.id]: "checkout" });
+      setResMemoMap({ ...resMemoMap, [item.id]: "" });
+    }
   };
 
   const filteredAndSortedRequests = useMemo(() => {
@@ -195,58 +216,58 @@ const RequestsPage = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
-    const targetItem = items.find((i) => i.id === selectedItemId);
-    const reqQty = Number(quantity);
+    if (selectedItems.length === 0)
+      return toast.error("物品を選択してください");
 
-    if (reqQty <= 0) {
-      return toast.error("数量は1以上を入力してください。");
-    }
-
-    if (targetItem) {
-      const effectiveStock = calculateEffectiveStock(
-        targetItem.id,
-        targetItem.stock_quantity,
-      );
-      if (reqQty > effectiveStock) {
-        return toast.error(
-          `申請失敗: 他の予約を含めた有効在庫は残り ${effectiveStock} です。`,
-        );
+    for (const item of selectedItems) {
+      const eff = calculateEffectiveStock(item.id, item.stock_quantity);
+      const qty = resQtyMap[item.id] || 0;
+      if (qty <= 0)
+        return toast.error(`数量を入力してください: ${item.item_name}`);
+      if (qty > eff) return toast.error(`在庫不足: ${item.item_name}`);
+      if (resTypeMap[item.id] === "dispose" && !resMemoMap[item.id].trim()) {
+        return toast.error(`廃棄理由は必須です: ${item.item_name}`);
       }
     }
 
     setSubmitting(true);
     try {
-      let finalMemo = memo.trim();
-      if (scheduledDate) {
-        const [y, m, d] = scheduledDate.split("-");
-        const dateStr = `${y}年${m}月${d}日`;
-        finalMemo = `【予約】使用予定日：${dateStr}${finalMemo ? ` / ${finalMemo}` : ""}`;
-      }
+      const dateStr = resDate ? resDate.split("-").join("/") : "即時";
 
-      const { error } = await supabase.from("requests").insert([
-        {
-          item_id: selectedItemId,
+      const insertData = selectedItems.map((item) => {
+        let finalMemo = resMemoMap[item.id].trim();
+        if (resDate)
+          finalMemo = `【予定日:${dateStr}】${finalMemo ? ` / ${finalMemo}` : ""}`;
+
+        return {
+          item_id: item.id,
           user_id: currentUser.id,
-          request_type: requestType,
-          request_quantity: reqQty,
-          memo: finalMemo,
+          request_quantity: resQtyMap[item.id],
+          request_type: resTypeMap[item.id],
           status: "pending",
-          scheduled_date: scheduledDate || null,
-        },
-      ]);
+          scheduled_date: resDate || null,
+          memo: finalMemo,
+        };
+      });
+
+      const { error } = await supabase.from("requests").insert(insertData);
       if (error) throw error;
 
-      // ★ Discordへの新規申請通知（追加）
+      const summary = selectedItems
+        .map(
+          (i) =>
+            `・[${typeLabel[resTypeMap[i.id] || "checkout"]}] ${i.item_name} (x${resQtyMap[i.id]}) [${i.location_name}]`,
+        )
+        .join("\n");
+
       await sendRequestNotification(
-        `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name} ${targetItem?.label_no ? `[${targetItem.label_no}]` : ""}\n数量: ${reqQty}\n使用予定日: ${scheduledDate || "即時"}\n備考: ${finalMemo || "なし"}`,
+        `📝 **新規申請 (${selectedItems.length}件)**\n予定日: ${dateStr}\n申請者: ${currentUser.user_name}\n\n【内容】\n${summary}`,
       );
 
       toast.success("申請完了");
       setShowForm(false);
-      setQuantity(1);
-      setMemo("");
-      setScheduledDate("");
-      setRequestType("checkout");
+      setSelectedItems([]);
+      setResDate("");
       fetchData();
     } catch (error: any) {
       toast.error("申請失敗: " + error.message);
@@ -270,7 +291,6 @@ const RequestsPage = () => {
         .update({ status: "returned" })
         .eq("id", request.id);
 
-      // ★ Discordへの返却完了通知（追加）
       await sendRequestNotification(
         `🔄 **返却完了**\n申請者: ${users.find((u) => String(u.id) === String(request.user_id))?.user_name}\n物品: ${item.item_name}\n数量: ${request.request_quantity}\n処理者: ${currentUser?.user_name}`,
       );
@@ -293,7 +313,6 @@ const RequestsPage = () => {
 
   const renderRequestTable = (reqData: Request[]) => (
     <div>
-      {/* デスクトップ版表示 */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm text-left min-w-[1000px]">
           <thead className="bg-secondary/30 text-muted-foreground uppercase text-[11px] font-bold">
@@ -423,8 +442,6 @@ const RequestsPage = () => {
           </tbody>
         </table>
       </div>
-
-      {/* モバイル版表示 */}
       <div className="md:hidden divide-y divide-border/50">
         {reqData.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground italic text-sm">
@@ -524,36 +541,6 @@ const RequestsPage = () => {
     </div>
   );
 
-  const renderSelectedItem = () => {
-    const item = items.find((i) => i.id === selectedItemId);
-    if (!item)
-      return (
-        <span className="text-muted-foreground">物品を選択してください...</span>
-      );
-
-    const eff = calculateEffectiveStock(item.id, item.stock_quantity);
-    return (
-      <div className="flex items-center gap-2 w-full truncate pr-4">
-        <span
-          className={`px-2 py-0.5 rounded text-[10px] font-black border ${eff > 0 ? "bg-success/10 text-success border-success/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
-        >
-          {eff > 0 ? `残 ${eff}` : "在庫切"}
-        </span>
-        {item.category && (
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0 hidden sm:inline-block">
-            {item.category}
-          </span>
-        )}
-        <span className="font-bold text-sm truncate">{item.item_name}</span>
-        {item.label_no && (
-          <span className="text-[10px] font-mono bg-secondary px-1 rounded text-muted-foreground shrink-0">
-            {item.label_no}
-          </span>
-        )}
-      </div>
-    );
-  };
-
   const dropdownFilteredItems = useMemo(() => {
     const q = itemSelectSearch.toLowerCase();
     return items.filter(
@@ -588,86 +575,110 @@ const RequestsPage = () => {
             />
           </div>
           <button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              setShowForm(!showForm);
+              if (!showForm) {
+                setSelectedItems([]);
+                setResDate("");
+                setResQtyMap({});
+                setResTypeMap({});
+                setResMemoMap({});
+              }
+            }}
             className="flex justify-center items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-black text-sm font-bold shadow-sm active:scale-[0.98] transition-all"
           >
             {showForm ? (
               <X className="h-4 w-4" />
             ) : (
               <Plus className="h-4 w-4" />
-            )}{" "}
+            )}
             {showForm ? "中止" : "新規申請・予約"}
           </button>
         </div>
       </div>
 
       {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="p-5 sm:p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4 relative"
-        >
+        <div className="p-5 sm:p-6 rounded-xl bg-card border border-border shadow-sm space-y-5 animate-in fade-in slide-in-from-top-4 relative">
           <h3 className="font-bold flex items-center gap-2 text-foreground">
             <Plus className="h-4 w-4 text-primary" /> 新規申請・予約の作成
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-            {/* カスタムドロップダウン物品選択 */}
-            <div className="space-y-1.5 md:col-span-2 lg:col-span-1 relative">
-              <label className="text-[11px] font-bold uppercase opacity-50">
-                対象物品
-              </label>
 
-              <div
-                onClick={() => setIsItemSelectOpen(!isItemSelectOpen)}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border border-transparent hover:border-primary/50 text-foreground text-sm cursor-pointer flex justify-between items-center shadow-inner transition-colors"
+          <div className="space-y-1.5 relative">
+            <label className="text-[11px] font-bold uppercase opacity-50">
+              対象物品 (複数選択可)
+            </label>
+            <div
+              onClick={() => setIsItemSelectOpen(!isItemSelectOpen)}
+              className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border border-transparent hover:border-primary/50 text-foreground text-sm cursor-pointer flex justify-between items-center shadow-inner transition-colors"
+            >
+              <span
+                className={
+                  selectedItems.length > 0
+                    ? "font-bold text-primary"
+                    : "text-muted-foreground"
+                }
               >
-                {renderSelectedItem()}
-                <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
-              </div>
+                {selectedItems.length > 0
+                  ? `${selectedItems.length}件の物品を選択中`
+                  : "物品を選択してください..."}
+              </span>
+              <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+            </div>
 
-              {isItemSelectOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setIsItemSelectOpen(false)}
-                  ></div>
-                  <div className="absolute z-50 top-full left-0 w-full md:w-[400px] mt-1 bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2">
-                    <div className="p-2 border-b border-border bg-secondary/20">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                        <input
-                          type="text"
-                          autoFocus
-                          placeholder="物品名・ラベル・カテゴリで検索..."
-                          value={itemSelectSearch}
-                          onChange={(e) => setItemSelectSearch(e.target.value)}
-                          className="w-full pl-7 pr-2 py-2 rounded-lg bg-card border border-border text-xs outline-none focus:ring-1 ring-primary"
-                        />
-                      </div>
+            {isItemSelectOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsItemSelectOpen(false)}
+                ></div>
+                <div className="absolute z-50 top-full left-0 w-full mt-1 bg-card border border-border rounded-xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in slide-in-from-top-2 max-h-[50vh]">
+                  <div className="p-2 border-b border-border bg-secondary/20">
+                    <div className="relative">
+                      <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder="物品名・ラベル・カテゴリで検索..."
+                        value={itemSelectSearch}
+                        onChange={(e) => setItemSelectSearch(e.target.value)}
+                        className="w-full pl-7 pr-2 py-2 rounded-lg bg-card border border-border text-xs outline-none focus:ring-1 ring-primary"
+                      />
                     </div>
-                    <div className="max-h-64 overflow-y-auto p-1.5 space-y-1">
-                      {dropdownFilteredItems.length === 0 ? (
-                        <div className="text-center p-4 text-xs text-muted-foreground">
-                          見つかりません
-                        </div>
-                      ) : (
-                        dropdownFilteredItems.map((item) => {
-                          const eff = calculateEffectiveStock(
-                            item.id,
-                            item.stock_quantity,
-                          );
-                          const isDisabled = eff <= 0;
-                          return (
-                            <div
-                              key={item.id}
-                              onClick={() => {
-                                if (isDisabled) return;
-                                setSelectedItemId(item.id);
-                                setIsItemSelectOpen(false);
-                                setItemSelectSearch("");
-                              }}
-                              className={`flex items-center justify-between p-2.5 rounded-lg transition-colors ${isDisabled ? "opacity-50 cursor-not-allowed bg-secondary/10" : "cursor-pointer hover:bg-primary/10"}`}
-                            >
-                              <div className="flex flex-col gap-1 min-w-0 pr-3">
+                  </div>
+                  <div className="overflow-y-auto p-1.5 space-y-1">
+                    {dropdownFilteredItems.length === 0 ? (
+                      <div className="text-center p-4 text-xs text-muted-foreground">
+                        見つかりません
+                      </div>
+                    ) : (
+                      dropdownFilteredItems.map((item) => {
+                        const eff = calculateEffectiveStock(
+                          item.id,
+                          item.stock_quantity,
+                        );
+                        const isDisabled = eff <= 0;
+                        const isSelected = selectedItems.some(
+                          (i) => i.id === item.id,
+                        );
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (isDisabled) return;
+                              toggleItemSelection(item);
+                            }}
+                            className={`flex items-center justify-between p-2.5 rounded-lg transition-colors ${isDisabled ? "opacity-50 cursor-not-allowed bg-secondary/10" : "cursor-pointer hover:bg-primary/10"} ${isSelected ? "bg-primary/5 border border-primary/20" : ""}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0 pr-3">
+                              <div className="shrink-0">
+                                {isSelected ? (
+                                  <CheckSquare className="h-4 w-4 text-primary" />
+                                ) : (
+                                  <Square className="h-4 w-4 opacity-30" />
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-1 min-w-0">
                                 <div className="flex items-center gap-2">
                                   {item.category && (
                                     <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
@@ -685,7 +696,7 @@ const RequestsPage = () => {
                                 </div>
                                 <div className="text-[10px] text-muted-foreground flex items-center gap-1 truncate">
                                   <MapPin className="h-3 w-3" />{" "}
-                                  {item.location_name} - {item.location_no}
+                                  {item.location_name} - {item.location_no}{" "}
                                   {item.specifications && (
                                     <span className="ml-1 italic">
                                       | {item.specifications}
@@ -693,100 +704,142 @@ const RequestsPage = () => {
                                   )}
                                 </div>
                               </div>
-                              <div className="shrink-0 flex flex-col items-end">
-                                <span
-                                  className={`px-2 py-0.5 rounded text-[10px] font-black border ${isDisabled ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-success/10 text-success border-success/20"}`}
-                                >
-                                  {isDisabled ? "在庫切" : `残 ${eff}`}
-                                </span>
-                              </div>
                             </div>
-                          );
-                        })
-                      )}
-                    </div>
+                            <div className="shrink-0 flex flex-col items-end">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-black border ${isDisabled ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-success/10 text-success border-success/20"}`}
+                              >
+                                {isDisabled ? "在庫切" : `残 ${eff}`}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
-                </>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
-                申請種別
-              </label>
-              <select
-                value={requestType}
-                onChange={(e) =>
-                  setRequestType(e.target.value as Request["request_type"])
-                }
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none font-bold shadow-inner"
-              >
-                <option value="checkout">貸出 / 予約</option>
-                <option value="consume">消費 (返却不要)</option>
-                <option value="dispose">廃棄 (破損等)</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
-                使用予定日
-              </label>
-              <input
-                type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                min={new Date().toISOString().split("T")[0]}
-                max="9999-12-31"
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
-                数量
-              </label>
-              <input
-                type="number"
-                min={1}
-                value={quantity === 0 ? "" : quantity}
-                onChange={(e) =>
-                  setQuantity(
-                    e.target.value === "" ? "" : Number(e.target.value),
-                  )
-                }
-                onFocus={(e) => e.target.select()}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner font-mono font-bold"
-                required
-              />
-            </div>
-            <div className="space-y-1.5 md:col-span-2 lg:col-span-2">
-              <label className="text-[11px] font-bold uppercase opacity-50">
-                備考・用途
-              </label>
-              <input
-                type="text"
-                value={memo}
-                onChange={(e) => setMemo(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
-                placeholder={
-                  requestType === "dispose"
-                    ? "破損理由を入力"
-                    : "例: 実験で使用"
-                }
-                required={requestType === "dispose"}
-              />
-            </div>
+                </div>
+              </>
+            )}
           </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase opacity-50">
+              共通の使用予定日 (任意)
+            </label>
+            <input
+              type="date"
+              value={resDate}
+              onChange={(e) => setResDate(e.target.value)}
+              min={new Date().toISOString().split("T")[0]}
+              max="9999-12-31"
+              className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border-none text-foreground text-sm focus:ring-1 ring-primary outline-none shadow-inner"
+            />
+          </div>
+
+          {selectedItems.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-border">
+              <label className="text-[11px] font-bold opacity-50 uppercase tracking-widest">
+                個別設定 (数量・種別・備考)
+              </label>
+              <div className="space-y-2.5 max-h-[40vh] overflow-y-auto pr-2">
+                {selectedItems.map((item) => {
+                  const eff = calculateEffectiveStock(
+                    item.id,
+                    item.stock_quantity,
+                  );
+                  const currentVal = resQtyMap[item.id];
+                  const currentType = resTypeMap[item.id] || "checkout";
+                  const currentMemo = resMemoMap[item.id] || "";
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex flex-col gap-3 p-4 bg-secondary/20 rounded-2xl border border-border/50 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 pr-4 min-w-0">
+                          <div className="text-sm font-black truncate text-foreground">
+                            {item.item_name}
+                          </div>
+                          <div className="text-[9px] opacity-40 uppercase font-bold truncate">
+                            {item.label_no || "NO LABEL"} | {item.location_name}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <input
+                            type="number"
+                            min={1}
+                            max={eff}
+                            className="w-16 bg-card border border-border rounded-xl p-2 text-center text-sm font-black focus:ring-1 ring-primary outline-none shadow-sm"
+                            value={currentVal === 0 ? "" : currentVal}
+                            onChange={(e) =>
+                              setResQtyMap({
+                                ...resQtyMap,
+                                [item.id]:
+                                  e.target.value === ""
+                                    ? 0
+                                    : Number(e.target.value),
+                              })
+                            }
+                            onFocus={(e) => e.target.select()}
+                          />
+                          <span className="text-[10px] font-black opacity-20">
+                            / {eff}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <select
+                          className="w-28 bg-card border border-border rounded-xl p-2 text-xs font-bold outline-none focus:ring-1 ring-primary shadow-sm"
+                          value={currentType}
+                          onChange={(e) =>
+                            setResTypeMap({
+                              ...resTypeMap,
+                              [item.id]: e.target
+                                .value as Request["request_type"],
+                            })
+                          }
+                        >
+                          <option value="checkout">貸出/予約</option>
+                          <option value="consume">消費</option>
+                          <option value="dispose">廃棄</option>
+                        </select>
+                        <input
+                          type="text"
+                          placeholder={
+                            currentType === "dispose"
+                              ? "廃棄理由(必須)"
+                              : "個別備考..."
+                          }
+                          className="flex-1 bg-card border border-border rounded-xl p-2 text-xs outline-none focus:ring-1 ring-primary shadow-sm"
+                          value={currentMemo}
+                          onChange={(e) =>
+                            setResMemoMap({
+                              ...resMemoMap,
+                              [item.id]: e.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <button
-            type="submit"
-            disabled={submitting || items.length === 0}
+            onClick={handleSubmit}
+            disabled={submitting || selectedItems.length === 0}
             className="w-full sm:w-auto px-10 py-3 rounded-lg bg-primary text-black text-sm font-black disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all mt-2"
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              "申請を送信する"
+              "一括申請を送信する"
             )}
           </button>
-        </form>
+        </div>
       )}
 
       {loading ? (
