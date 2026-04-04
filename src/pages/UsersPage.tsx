@@ -10,6 +10,9 @@ import {
   ArrowUpDown,
   ChevronUp,
   ChevronDown,
+  ShieldAlert,
+  ShieldCheck,
+  Key,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,12 +29,13 @@ type SortConfig = {
 
 const UsersPage = () => {
   const { currentUser } = useAuth();
+  const isRole2 = currentUser?.role === 2;
+
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // 並び替え状態の管理 (デフォルトはID昇順)
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     key: "id",
     direction: "asc",
@@ -39,7 +43,9 @@ const UsersPage = () => {
 
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase.from("users").select("*");
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, user_name, role, is_active, password");
       if (error) throw error;
       setUsers(data || []);
     } catch (error: any) {
@@ -53,7 +59,6 @@ const UsersPage = () => {
     fetchUsers();
   }, []);
 
-  // --- 並び替えロジック ---
   const sortedUsers = useMemo(() => {
     const sortableItems = [...users];
     sortableItems.sort((a, b) => {
@@ -93,10 +98,20 @@ const UsersPage = () => {
     );
   };
 
-  // --- 権限・凍結・一括操作ロジック (既存機能維持) ---
   const handleRoleChange = async (userId: string, newRole: number) => {
-    if (userId === currentUser?.id)
+    if (userId === String(currentUser?.id))
       return toast.error("自分自身の権限は変更不可");
+
+    const targetUser = users.find((u) => String(u.id) === userId);
+    if (!targetUser) return;
+
+    if (!isRole2 && targetUser.role === 2) {
+      return toast.error("最高管理者の権限は変更できません（越権行為）");
+    }
+    if (!isRole2 && newRole === 2) {
+      return toast.error("最高管理者を任命する権限がありません（越権行為）");
+    }
+
     setProcessingId(userId);
     try {
       const { error } = await supabase
@@ -117,9 +132,19 @@ const UsersPage = () => {
     userId: string,
     currentActiveStatus: boolean,
   ) => {
-    if (userId === currentUser?.id) return toast.error("自身を凍結不可");
+    if (userId === String(currentUser?.id))
+      return toast.error("自身を凍結不可");
+
+    const targetUser = users.find((u) => String(u.id) === userId);
+    if (!targetUser) return;
+
+    if (!isRole2 && targetUser.role === 2) {
+      return toast.error("最高管理者を凍結することはできません（越権行為）");
+    }
+
     const newStatus = !currentActiveStatus;
     if (!confirm(`本当に${newStatus ? "復旧" : "凍結"}しますか？`)) return;
+
     setProcessingId(userId);
     try {
       const { error } = await supabase
@@ -143,13 +168,27 @@ const UsersPage = () => {
 
   const handleBulkFreeze = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`${selectedIds.size}人を一括凍結しますか？`)) return;
+
+    const targetIds = Array.from(selectedIds).filter((id) => {
+      const user = users.find((u) => String(u.id) === id);
+      if (!isRole2 && user?.role === 2) return false;
+      return true;
+    });
+
+    if (targetIds.length === 0) {
+      toast.error("選択されたユーザーに凍結可能な対象が含まれていません");
+      setSelectedIds(new Set());
+      return;
+    }
+
+    if (!confirm(`${targetIds.length}人を一括凍結しますか？`)) return;
+
     setProcessingId("bulk");
     try {
       const { error } = await supabase
         .from("users")
         .update({ is_active: false })
-        .in("id", Array.from(selectedIds));
+        .in("id", targetIds);
       if (error) throw error;
       toast.success("一括凍結完了");
       setSelectedIds(new Set());
@@ -167,15 +206,21 @@ const UsersPage = () => {
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
-  const selectableUsers = users.filter(
-    (u) => u.id !== currentUser?.id && u.is_active !== false,
-  );
+
+  const selectableUsers = users.filter((u) => {
+    if (String(u.id) === String(currentUser?.id)) return false;
+    if (u.is_active === false) return false;
+    if (!isRole2 && u.role === 2) return false;
+    return true;
+  });
+
   const toggleSelectAll = () =>
     setSelectedIds(
       selectedIds.size === selectableUsers.length
         ? new Set()
-        : new Set(selectableUsers.map((u) => u.id)),
+        : new Set(selectableUsers.map((u) => String(u.id))),
     );
+
   const isAllSelected =
     selectableUsers.length > 0 && selectedIds.size === selectableUsers.length;
 
@@ -249,12 +294,9 @@ const UsersPage = () => {
                     権限 {getSortIcon("role")}
                   </div>
                 </th>
-                <th
-                  onClick={() => requestSort("password")}
-                  className="px-4 py-4 w-40 cursor-pointer hover:text-foreground transition-colors text-center"
-                >
+                <th className="px-4 py-4 w-40 text-center">
                   <div className="flex items-center justify-center gap-1">
-                    パスワード {getSortIcon("password")}
+                    パスワード状態
                   </div>
                 </th>
                 <th className="px-4 py-4 w-28 text-center">個別操作</th>
@@ -262,8 +304,13 @@ const UsersPage = () => {
             </thead>
             <tbody className="divide-y divide-border/50">
               {sortedUsers.map((user) => {
-                const isMe = user.id === currentUser?.id;
+                const isMe = String(user.id) === String(currentUser?.id);
                 const isActive = user.is_active !== false;
+
+                const isUnauthorizedTarget = !isRole2 && user.role === 2;
+                const disableActions =
+                  isMe || !isActive || isUnauthorizedTarget;
+
                 return (
                   <tr
                     key={user.id}
@@ -272,9 +319,9 @@ const UsersPage = () => {
                     <td className="px-4 py-4 text-center">
                       <input
                         type="checkbox"
-                        checked={selectedIds.has(user.id)}
-                        onChange={() => toggleSelect(user.id)}
-                        disabled={isMe || !isActive}
+                        checked={selectedIds.has(String(user.id))}
+                        onChange={() => toggleSelect(String(user.id))}
+                        disabled={disableActions}
                         className="rounded border-border"
                       />
                     </td>
@@ -293,28 +340,64 @@ const UsersPage = () => {
                     </td>
                     <td className="px-4 py-4">
                       <select
-                        disabled={isMe || !isActive || processingId === user.id}
+                        disabled={
+                          disableActions || processingId === String(user.id)
+                        }
                         value={user.role}
                         onChange={(e) =>
-                          handleRoleChange(user.id, Number(e.target.value))
+                          handleRoleChange(
+                            String(user.id),
+                            Number(e.target.value),
+                          )
                         }
                         className="w-full px-2 py-1.5 rounded bg-secondary/50 border border-border text-xs font-bold"
                       >
                         <option value={0}>{roleLabels[0]}</option>
                         <option value={1}>{roleLabels[1]}</option>
-                        <option value={2}>{roleLabels[2]}</option>
+                        {(isRole2 || user.role === 2) && (
+                          <option value={2}>{roleLabels[2]}</option>
+                        )}
                       </select>
                     </td>
-                    <td className="px-4 py-4 text-center font-mono font-bold text-primary">
-                      {user.role >= 1 ? user.password || "未設定" : "-"}
+                    <td className="px-4 py-4 text-center font-mono text-xs">
+                      {user.role >= 1 ? (
+                        isRole2 ? (
+                          <div className="flex items-center justify-center gap-2 font-mono text-xs text-primary bg-primary/5 p-2 rounded-lg border border-primary/20">
+                            <Key className="h-3 w-3 shrink-0" />
+                            <span className="font-black tracking-tight">
+                              {user.password || "未設定"}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-1.5 text-[10px] font-black uppercase">
+                            {user.password ? (
+                              <>
+                                <ShieldCheck className="h-4 w-4 text-success" />{" "}
+                                <span className="text-success">設定済</span>
+                              </>
+                            ) : (
+                              <>
+                                <ShieldAlert className="h-4 w-4 text-destructive" />{" "}
+                                <span className="text-destructive">未設定</span>
+                              </>
+                            )}
+                          </div>
+                        )
+                      ) : (
+                        <span className="opacity-30">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-4 text-center">
                       <button
-                        onClick={() => handleToggleActive(user.id, isActive)}
-                        disabled={isMe || processingId === user.id}
-                        className={`inline-flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-bold transition-colors ${isActive ? "bg-destructive/10 text-destructive hover:bg-destructive hover:text-white" : "bg-success/10 text-success hover:bg-success hover:text-white"}`}
+                        onClick={() =>
+                          handleToggleActive(String(user.id), isActive)
+                        }
+                        disabled={
+                          disableActions || processingId === String(user.id)
+                        }
+                        className={`inline-flex items-center gap-1 px-3 py-1.5 rounded text-[11px] font-bold transition-colors ${disableActions ? "bg-secondary text-muted-foreground opacity-50 cursor-not-allowed" : isActive ? "bg-destructive/10 text-destructive hover:bg-destructive hover:text-white" : "bg-success/10 text-success hover:bg-success hover:text-white"}`}
                       >
-                        {processingId === user.id ? (
+                        {processingId === String(user.id) ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : isActive ? (
                           <>
