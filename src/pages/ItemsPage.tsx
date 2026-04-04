@@ -114,6 +114,7 @@ const ItemsPage = () => {
   };
 
   // ★ 物品の新規登録 ＆ 通知ロジック
+  // ★ 物品の新規登録 ＆ 通知ロジック
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -127,7 +128,21 @@ const ItemsPage = () => {
       );
 
       toast.success("登録完了");
+
+      // --- ここから追加：入力欄をクリアする ---
+      setNewItem({
+        item_name: "",
+        label_no: "",
+        specifications: "",
+        location_name: "",
+        location_no: "",
+        stock_quantity: 0,
+        memo: "",
+      });
+      // フォームを閉じる（モバイル用）
       if (window.innerWidth <= 768) setIsFormOpen(false);
+      // ---------------------------------------
+
       fetchData();
     } catch (e: any) {
       toast.error(e.message);
@@ -317,6 +332,8 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
+                  value={newItem.item_name} // ステートと同期
+                  disabled={submitting} // 送信中は触らせない
                   placeholder="物品の名称"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -330,6 +347,7 @@ const ItemsPage = () => {
                 </label>
                 <input
                   type="text"
+                  value={newItem.label_no} // ← これを追加
                   placeholder="管理番号があれば入力"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -344,6 +362,7 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
+                  value={newItem.location_name} // ← これを追加
                   placeholder="倉庫名など"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -358,6 +377,7 @@ const ItemsPage = () => {
                 <input
                   type="text"
                   required
+                  value={newItem.location_no} // ← これを追加
                   placeholder="配置エリア"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
@@ -373,6 +393,9 @@ const ItemsPage = () => {
                   type="number"
                   required
                   min={0}
+                  value={
+                    newItem.stock_quantity === 0 ? "" : newItem.stock_quantity
+                  } // 0の時に空にする工夫
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all font-mono"
                   onChange={(e) =>
                     setNewItem({
@@ -388,6 +411,7 @@ const ItemsPage = () => {
                 </label>
                 <input
                   type="text"
+                  value={newItem.specifications} // ← これを追加
                   placeholder="サイズ、色、用途など"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>

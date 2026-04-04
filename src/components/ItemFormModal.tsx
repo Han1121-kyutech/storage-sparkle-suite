@@ -10,7 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { sendInventoryNotification } from "@/utils/notificationUtils"; // ★ 通知用関数をインポート
+import { sendInventoryNotification } from "@/utils/notificationUtils";
 
 interface ItemFormModalProps {
   open: boolean;
@@ -91,9 +91,11 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       itemData.alert_threshold = Math.max(0, alertThreshold);
       itemData.category = catTrimmed || null;
     } else if (!item) {
+      // 一般ユーザーの新規作成時のみデフォルト値を設定
       itemData.alert_threshold = 5;
       itemData.category = null;
     }
+    // 一般ユーザーの編集時は、itemDataにalert_thresholdとcategoryを含めないことでDB側の上書きを防ぐ
 
     try {
       let resultData: Item | null = null;
@@ -121,7 +123,6 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
 
       toast.success(item ? "更新しました" : "追加しました");
 
-      // ★ ここでDiscordへ通知を投げる
       const notifyMsg = item
         ? `📝 **物品編集**\n名前: ${itemData.item_name}\n保管場所: ${itemData.location_name}\n在庫数: ${itemData.stock_quantity}`
         : `✨ **新規物品登録**\n名前: ${itemData.item_name}\n保管場所: ${itemData.location_name}\n初期在庫: ${itemData.stock_quantity}`;
@@ -155,10 +156,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-[11px] font-bold uppercase opacity-50">
+            <label
+              htmlFor="itemName"
+              className="text-[11px] font-bold uppercase opacity-50"
+            >
               物品名
             </label>
             <input
+              id="itemName"
               required
               disabled={isSubmitting}
               value={itemName}
@@ -168,10 +173,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="labelNo"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 ラベル番号
               </label>
               <input
+                id="labelNo"
                 disabled={isSubmitting}
                 value={labelNo}
                 onChange={(e) => setLabelNo(e.target.value)}
@@ -180,10 +189,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="specifications"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 規格 (大きさ・長さ等)
               </label>
               <input
+                id="specifications"
                 disabled={isSubmitting}
                 value={specifications}
                 onChange={(e) => setSpecifications(e.target.value)}
@@ -194,10 +207,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="locationName"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 保管場所
               </label>
               <input
+                id="locationName"
                 required
                 disabled={isSubmitting}
                 value={locationName}
@@ -206,10 +223,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="locationNo"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 棚番号
               </label>
               <input
+                id="locationNo"
                 required
                 disabled={isSubmitting}
                 value={locationNo}
@@ -220,10 +241,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="stockQuantity"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 在庫数
               </label>
               <input
+                id="stockQuantity"
                 required
                 disabled={isSubmitting}
                 type="number"
@@ -234,10 +259,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold uppercase opacity-50">
+              <label
+                htmlFor="memo"
+                className="text-[11px] font-bold uppercase opacity-50"
+              >
                 備考
               </label>
               <input
+                id="memo"
                 disabled={isSubmitting}
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
@@ -250,10 +279,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
           {isRole2 && (
             <div className="grid grid-cols-2 gap-4 border-t border-border pt-4 mt-2">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold uppercase text-destructive">
+                <label
+                  htmlFor="alertThreshold"
+                  className="text-[11px] font-bold uppercase text-destructive"
+                >
                   警告閾値 (Role 2限定)
                 </label>
                 <input
+                  id="alertThreshold"
                   type="number"
                   min={0}
                   disabled={isSubmitting}
@@ -264,10 +297,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-bold uppercase text-primary">
+                <label
+                  htmlFor="category"
+                  className="text-[11px] font-bold uppercase text-primary"
+                >
                   カテゴリ上書き (Role 2限定)
                 </label>
                 <input
+                  id="category"
                   disabled={isSubmitting}
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
