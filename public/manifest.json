@@ -1,0 +1,16 @@
+{
+  "short_name": "KIT在庫",
+  "name": "KIT Inventory System",
+  "icons": [
+    {
+      "src": "/KIT_66.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#000000"
+}
