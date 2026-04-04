@@ -203,7 +203,6 @@ const AdminPage = () => {
     }
   };
 
-  // マルチカテゴリ一括更新ロジック (追加・削除・全消去)
   const handleBulkUpdateCategory = async (
     action: "add" | "remove" | "clear",
   ) => {
@@ -280,7 +279,6 @@ const AdminPage = () => {
     const groups: Record<string, GroupedAdminItem> = {};
     filtered.forEach((i) => {
       if (!groups[i.item_name]) {
-        // グループ代表として最初のカテゴリを採用する（同じ名前ならカテゴリも同じ運用とする）
         const cats = i.category
           ? i.category
               .split(",")
@@ -357,6 +355,7 @@ const AdminPage = () => {
     g.requests.every((r) => r.status !== "pending"),
   );
 
+  // ★ 申請ステータスの更新 ＆ 通知ロジック
   const updateBulkStatus = async (
     group: RequestGroup,
     s: Request["status"],
@@ -366,6 +365,8 @@ const AdminPage = () => {
       const targetRequests = group.requests.filter((r) =>
         s === "returned" ? r.status === "approved" : r.status === "pending",
       );
+
+      if (targetRequests.length === 0) return;
 
       for (const r of targetRequests) {
         const i = items.find((item) => item.id === r.item_id);
@@ -385,6 +386,36 @@ const AdminPage = () => {
             .update({ stock_quantity: i.stock_quantity + r.request_quantity })
             .eq("id", i.id);
         await supabase.from("requests").update({ status: s }).eq("id", r.id);
+      }
+
+      // ★ ここでDiscordへステータス更新を通知
+      let statusText = "";
+      let icon = "";
+      if (s === "approved") {
+        statusText = "承認";
+        icon = "✅";
+      } else if (s === "rejected") {
+        statusText = "却下";
+        icon = "❌";
+      } else if (s === "returned") {
+        statusText = "返却完了";
+        icon = "🔙";
+      }
+
+      if (statusText) {
+        const targetUser =
+          users.find((u) => String(u.id) === String(group.user_id))
+            ?.user_name || "不明";
+        if (group.isBulk) {
+          await sendRequestNotification(
+            `${icon} **一括ステータス更新: ${statusText}**\n対象件数: ${targetRequests.length}件\n申請者: ${targetUser}\n処理者: ${currentUser?.user_name}`,
+          );
+        } else {
+          const itm = items.find((i) => i.id === targetRequests[0].item_id);
+          await sendRequestNotification(
+            `${icon} **申請ステータス更新: ${statusText}**\n対象物品: ${itm?.item_name}\n申請者: ${targetUser}\n処理者: ${currentUser?.user_name}`,
+          );
+        }
       }
 
       toast.success("ステータスを更新しました");
@@ -611,7 +642,6 @@ const AdminPage = () => {
                   <FileDown className="h-4 w-4" /> CSV出力
                 </button>
 
-                {/* ★Role 2専用: カテゴリ一括設定モードトグル★ */}
                 {isRole2 && (
                   <button
                     onClick={() => {
@@ -709,7 +739,6 @@ const AdminPage = () => {
                           {g.total_stock}
                         </div>
 
-                        {/* ★Role 2専用: 個別閾値設定UI★ */}
                         {isRole2 && !isCategoryMode && (
                           <div
                             className="flex items-center gap-2"
@@ -912,7 +941,6 @@ const AdminPage = () => {
         </div>
       </section>
 
-      {/* ★Role 2専用: カテゴリ一括更新フローティングバー★ */}
       {isCategoryMode && selectedGroupNames.size > 0 && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10">
           <div className="bg-black/90 backdrop-blur-md border border-primary/30 rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row items-center gap-4 min-w-[360px]">
@@ -972,12 +1000,20 @@ const AdminPage = () => {
         }}
         item={editingItem}
       />
+
+      {/* ★ 物品削除とDiscord通知の実装 ★ */}
       <DeleteConfirmDialog
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={async () => {
           if (!deleteTarget) return;
           await supabase.from("items").delete().eq("id", deleteTarget.id);
+
+          // Discordへ削除通知を送信
+          await sendInventoryNotification(
+            `🗑️ **物品削除**\n名前: ${deleteTarget.item_name}\n保管場所: ${deleteTarget.location_name}\nこの物品はシステムから完全に削除されました。`,
+          );
+
           reloadAll();
           setDeleteTarget(null);
         }}

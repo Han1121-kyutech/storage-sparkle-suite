@@ -23,11 +23,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// 動的閾値に基づくカラークラス判定（Role 2の支配ロジック）
+// 動的閾値に基づくカラークラス判定
 const getStockColorClass = (quantity: number, threshold: number = 5) => {
-  if (quantity >= threshold * 3) return "text-success"; // 緑: 閾値の3倍以上なら安全
-  if (quantity >= threshold) return "text-warning"; // 黄: 閾値以上なら注意
-  return "text-destructive font-black animate-pulse"; // 赤: 閾値未満で警告（点滅）
+  if (quantity >= threshold * 3) return "text-success";
+  if (quantity >= threshold) return "text-warning";
+  return "text-destructive font-black animate-pulse";
 };
 
 type GroupedItem = {
@@ -113,12 +113,19 @@ const ItemsPage = () => {
     });
   };
 
+  // ★ 物品の新規登録 ＆ 通知ロジック
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
       const { error } = await supabase.from("items").insert([newItem]);
       if (error) throw error;
+
+      // Discord通知送信
+      await sendInventoryNotification(
+        `✨ **新規物品登録 (簡易登録)**\n名前: ${newItem.item_name}\n保管場所: ${newItem.location_name}\n棚番: ${newItem.location_no}\n初期在庫: ${newItem.stock_quantity}\n登録者: ${currentUser?.user_name}`,
+      );
+
       toast.success("登録完了");
       if (window.innerWidth <= 768) setIsFormOpen(false);
       fetchData();
@@ -167,11 +174,15 @@ const ItemsPage = () => {
       const { error } = await supabase.from("requests").insert(insertData);
       if (error) throw error;
 
+      // ★ Discordへの詳細通知（申請セクションへ）
       const summary = reservingItems
-        .map((i) => `${i.item_name} x${resQtyMap[i.id]}`)
+        .map(
+          (i) => `・${i.item_name} (x${resQtyMap[i.id]}) [${i.location_name}]`,
+        )
         .join("\n");
+
       await sendRequestNotification(
-        `📅 **在庫予約 (${reservingItems.length}件)**\n予定日: ${dateStr}\n予約者: ${currentUser?.user_name}\n\n内容:\n${summary}`,
+        `📅 **新規予約申請 (${reservingItems.length}件)**\n予定日: ${dateStr}\n予約者: ${currentUser?.user_name}\n\n【予約内容】\n${summary}`,
       );
 
       toast.success("予約申請完了");
@@ -193,7 +204,7 @@ const ItemsPage = () => {
         i.item_name.toLowerCase().includes(q) ||
         i.location_no.toLowerCase().includes(q) ||
         (i.label_no && i.label_no.toLowerCase().includes(q)) ||
-        (i.category && i.category.toLowerCase().includes(q)); // カテゴリでの検索も可能に
+        (i.category && i.category.toLowerCase().includes(q));
       const matchesLocation =
         selectedLocation === "all" || i.location_name === selectedLocation;
       return matchesSearch && matchesLocation;
@@ -228,13 +239,13 @@ const ItemsPage = () => {
           <h2 className="text-2xl font-bold font-mono text-foreground tracking-tighter flex items-center gap-2">
             物品管理{" "}
             {isBulkMode && (
-              <span className="text-xs bg-primary text-black px-2 py-0.5 rounded-full animate-pulse">
+              <span className="text-xs bg-primary text-black px-2 py-0.5 rounded-full animate-pulse font-black">
                 選択モード
               </span>
             )}
           </h2>
           <p className="text-muted-foreground text-sm mt-1">
-            有効在庫：予約を除いたリアルタイムな数
+            有効在庫：他者の予約を除いた即時利用可能な数
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
@@ -243,16 +254,16 @@ const ItemsPage = () => {
               setIsBulkMode(!isBulkMode);
               setSelectedItemIds(new Set());
             }}
-            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold ${isBulkMode ? "bg-primary text-black border-primary" : "bg-card border-border text-foreground"}`}
+            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border transition-all text-sm font-bold shadow-sm ${isBulkMode ? "bg-primary text-black border-primary ring-2 ring-primary/20" : "bg-card border-border text-foreground hover:bg-secondary"}`}
           >
             <ListChecks className="h-4 w-4" />{" "}
-            {isBulkMode ? "モード終了" : "一括予約"}
+            {isBulkMode ? "モード解除" : "一括予約申請"}
           </button>
           <div className="relative flex-1 md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="名前・ラベル・カテゴリ検索..."
+              placeholder="検索（名前・棚番・カテゴリ）..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border text-sm outline-none focus:ring-1 ring-primary shadow-sm"
@@ -263,9 +274,9 @@ const ItemsPage = () => {
             <select
               value={selectedLocation}
               onChange={(e) => setSelectedLocation(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-card border border-border text-sm font-bold appearance-none outline-none shadow-sm"
+              className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-card border border-border text-sm font-bold appearance-none outline-none shadow-sm cursor-pointer"
             >
-              <option value="all">すべての場所</option>
+              <option value="all">すべての拠点</option>
               {uniqueLocations.map((loc) => (
                 <option key={loc} value={loc}>
                   {loc}
@@ -283,8 +294,8 @@ const ItemsPage = () => {
             onClick={() => setIsFormOpen(!isFormOpen)}
             className="w-full flex items-center justify-between p-4 bg-primary/5"
           >
-            <span className="font-bold flex items-center gap-2">
-              <Plus className="h-4 w-4" /> 新規物品登録
+            <span className="font-bold flex items-center gap-2 text-sm">
+              <Plus className="h-4 w-4 text-primary" /> 新規物品登録
             </span>
             {isFormOpen ? (
               <X className="h-4 w-4" />
@@ -294,69 +305,75 @@ const ItemsPage = () => {
           </button>
         </div>
         {(isFormOpen || window.innerWidth > 768) && (
-          <div className="p-5 border-t md:border-t-0">
+          <div className="p-5 border-t md:border-t-0 bg-secondary/5">
             <form
               onSubmit={handleAddItem}
               className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs"
             >
-              <div className="space-y-1">
-                <label className="font-bold opacity-50 uppercase">物品名</label>
+              <div className="space-y-1.5">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
+                  物品名
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="例: マスキングテープ"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  placeholder="物品の名称"
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
                     setNewItem({ ...newItem, item_name: e.target.value })
                   }
                 />
               </div>
-              <div className="space-y-1">
-                <label className="font-bold opacity-50 uppercase">
+              <div className="space-y-1.5">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
                   ラベルNo
                 </label>
                 <input
                   type="text"
-                  placeholder="例: DR-01"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  placeholder="管理番号があれば入力"
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
                     setNewItem({ ...newItem, label_no: e.target.value })
                   }
                 />
               </div>
-              <div className="space-y-1">
-                <label className="font-bold opacity-50 uppercase">
+              <div className="space-y-1.5">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
                   保管場所
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="例: 第1倉庫"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  placeholder="倉庫名など"
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
                     setNewItem({ ...newItem, location_name: e.target.value })
                   }
                 />
               </div>
-              <div className="space-y-1">
-                <label className="font-bold opacity-50 uppercase">棚番</label>
+              <div className="space-y-1.5">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
+                  棚番
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="例: A-1"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  placeholder="配置エリア"
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
                     setNewItem({ ...newItem, location_no: e.target.value })
                   }
                 />
               </div>
-              <div className="space-y-1">
-                <label className="font-bold opacity-50 uppercase">数量</label>
+              <div className="space-y-1.5">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
+                  初期在庫数
+                </label>
                 <input
                   type="number"
                   required
-                  placeholder="0"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  min={0}
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all font-mono"
                   onChange={(e) =>
                     setNewItem({
                       ...newItem,
@@ -365,14 +382,14 @@ const ItemsPage = () => {
                   }
                 />
               </div>
-              <div className="space-y-1 md:col-span-2">
-                <label className="font-bold opacity-50 uppercase">
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="font-bold opacity-50 uppercase tracking-wider">
                   備考/規格
                 </label>
                 <input
                   type="text"
-                  placeholder="例: 幅18mm"
-                  className="w-full bg-secondary/50 p-2 rounded outline-none border border-transparent focus:border-primary"
+                  placeholder="サイズ、色、用途など"
+                  className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
                   onChange={(e) =>
                     setNewItem({ ...newItem, specifications: e.target.value })
                   }
@@ -380,9 +397,10 @@ const ItemsPage = () => {
               </div>
               <button
                 type="submit"
-                className="bg-primary text-black font-bold h-9 mt-5 rounded shadow-sm hover:opacity-90 active:scale-[0.98] transition-all"
+                disabled={submitting}
+                className="bg-primary text-black font-black h-10 mt-5 rounded-lg shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
               >
-                物品登録
+                {submitting ? "登録中..." : "物品を追加する"}
               </button>
             </form>
           </div>
@@ -399,7 +417,7 @@ const ItemsPage = () => {
           return (
             <div
               key={group.item_name}
-              className="rounded-xl border border-border bg-card overflow-hidden shadow-sm"
+              className={`rounded-xl border transition-all shadow-sm ${group.effective_stock < group.alert_threshold ? "border-destructive/30 bg-destructive/5" : "border-border bg-card"}`}
             >
               <button
                 onClick={() =>
@@ -418,18 +436,18 @@ const ItemsPage = () => {
                   <div className="text-left">
                     <div className="flex items-center gap-2 mb-0.5">
                       {group.category && (
-                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20">
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 uppercase tracking-tighter">
                           {group.category}
                         </span>
                       )}
-                      <div className="text-base font-black uppercase tracking-tight">
+                      <div className="text-base font-black uppercase tracking-tight text-foreground">
                         {group.item_name}
                       </div>
                     </div>
                     <div className="text-[10px] text-muted-foreground font-mono">
-                      計: {group.total_stock} |{" "}
+                      在庫総数: {group.total_stock} |{" "}
                       <span className={effectiveColor}>
-                        有効: {group.effective_stock}
+                        有効在庫: {group.effective_stock}
                       </span>
                     </div>
                   </div>
@@ -448,15 +466,15 @@ const ItemsPage = () => {
                 </div>
               </button>
               {isOpen && (
-                <div className="border-t border-border bg-secondary/5">
+                <div className="border-t border-border bg-secondary/5 overflow-hidden">
                   <table className="w-full text-sm text-left">
-                    <thead className="bg-secondary/20 text-[10px] font-bold uppercase text-muted-foreground">
+                    <thead className="bg-secondary/20 text-[10px] font-bold uppercase text-muted-foreground tracking-widest">
                       <tr>
                         {isBulkMode && <th className="px-6 py-3 w-10"></th>}
                         <th className="px-6 py-3 w-16">ID</th>
-                        <th className="px-6 py-3">場所 / 棚番</th>
+                        <th className="px-6 py-3">保管場所 / 棚番</th>
                         <th className="px-6 py-3">ラベル / 規格</th>
-                        <th className="px-6 py-3 text-right">有効在庫</th>
+                        <th className="px-6 py-3 text-right">有効数</th>
                         {!isBulkMode && (
                           <th className="px-6 py-3 text-center">操作</th>
                         )}
@@ -493,21 +511,21 @@ const ItemsPage = () => {
                                 )}
                               </td>
                             )}
-                            <td className="px-6 py-4 font-mono text-xs opacity-50">
+                            <td className="px-6 py-4 font-mono text-[10px] opacity-40">
                               #{loc.id}
                             </td>
                             <td className="px-6 py-4 font-bold">
                               <div className="flex items-center gap-2">
                                 <MapPin className="h-3 w-3 opacity-50" />{" "}
                                 {loc.location_name}{" "}
-                                <span className="font-mono text-primary bg-primary/10 px-1 rounded">
+                                <span className="font-mono text-primary bg-primary/5 px-1 rounded border border-primary/10">
                                   {loc.location_no}
                                 </span>
                               </div>
                             </td>
                             <td className="px-6 py-4 text-xs font-mono">
                               {loc.label_no && (
-                                <span className="bg-secondary p-1 rounded mr-2 border border-border/50 text-[10px]">
+                                <span className="bg-secondary p-1 rounded mr-2 border border-border/50 text-[10px] font-bold">
                                   {loc.label_no}
                                 </span>
                               )}
@@ -516,7 +534,7 @@ const ItemsPage = () => {
                               </span>
                             </td>
                             <td
-                              className={`px-6 py-4 text-right font-mono font-bold ${getStockColorClass(eff, loc.alert_threshold ?? 5)}`}
+                              className={`px-6 py-4 text-right font-mono font-black ${getStockColorClass(eff, loc.alert_threshold ?? 5)}`}
                             >
                               {eff}
                             </td>
@@ -528,9 +546,9 @@ const ItemsPage = () => {
                                     openReserveModal([loc]);
                                   }}
                                   disabled={!isSelectable}
-                                  className={`text-[10px] font-bold px-3 py-1 rounded transition-all ${isSelectable ? "bg-primary/10 text-primary border border-primary/20 hover:bg-primary hover:text-black shadow-sm" : "bg-secondary text-muted-foreground opacity-50 cursor-not-allowed"}`}
+                                  className={`text-[10px] font-black px-4 py-1.5 rounded-lg transition-all shadow-sm ${isSelectable ? "bg-primary text-black hover:opacity-90 active:scale-95" : "bg-secondary text-muted-foreground opacity-50 cursor-not-allowed"}`}
                                 >
-                                  {isSelectable ? "予約" : "在庫切"}
+                                  {isSelectable ? "予約申請" : "在庫なし"}
                                 </button>
                               </td>
                             )}
@@ -548,12 +566,12 @@ const ItemsPage = () => {
 
       {isBulkMode && selectedItemIds.size > 0 && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10">
-          <div className="bg-black/90 backdrop-blur-md border border-primary/30 rounded-2xl p-4 shadow-2xl flex items-center gap-6 min-w-[320px]">
+          <div className="bg-black/90 backdrop-blur-md border border-primary/30 rounded-2xl p-5 shadow-2xl flex items-center gap-8 min-w-[340px]">
             <div className="text-white">
-              <div className="text-[10px] font-bold opacity-50 uppercase">
+              <div className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
                 Selected
               </div>
-              <div className="text-xl font-black">
+              <div className="text-2xl font-black">
                 {selectedItemIds.size}{" "}
                 <span className="text-[10px] font-medium opacity-50 uppercase">
                   items
@@ -564,9 +582,9 @@ const ItemsPage = () => {
               onClick={() =>
                 openReserveModal(items.filter((i) => selectedItemIds.has(i.id)))
               }
-              className="flex-1 bg-primary text-black font-black py-3 rounded-xl shadow-lg hover:opacity-90 active:scale-[0.98] transition-all"
+              className="flex-1 bg-primary text-black font-black py-3.5 rounded-xl shadow-lg hover:opacity-95 active:scale-[0.98] transition-all text-sm uppercase tracking-tighter"
             >
-              一括予約へ進む
+              一括予約を確定する
             </button>
           </div>
         </div>
@@ -574,34 +592,35 @@ const ItemsPage = () => {
 
       {reservingItems.length > 0 && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-card w-full max-w-md rounded-3xl p-6 border border-border shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto">
+          <div className="bg-card w-full max-w-md rounded-3xl p-6 border border-border shadow-2xl space-y-6 max-h-[85vh] overflow-y-auto">
             <div className="flex justify-between items-center">
-              <h3 className="font-bold flex items-center gap-2">
-                <CalendarDays className="h-5 w-5 text-primary" /> 予約申請
+              <h3 className="font-black text-lg flex items-center gap-2 text-foreground">
+                <CalendarDays className="h-5 w-5 text-primary" />{" "}
+                予約申請フォーム
               </h3>
               <button
                 onClick={() => setReservingItems([])}
-                className="hover:opacity-50"
+                className="hover:opacity-50 p-1"
               >
-                <X className="h-5 w-5" />
+                <X className="h-6 w-6" />
               </button>
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
-                使用予定日
+              <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
+                使用予定日 (必須)
               </label>
               <input
                 type="date"
                 max="9999-12-31"
-                className="w-full bg-secondary/50 p-3.5 rounded-2xl outline-none border border-border focus:ring-1 ring-primary font-bold shadow-inner"
+                className="w-full bg-secondary/30 p-4 rounded-2xl outline-none border border-border focus:ring-1 ring-primary font-black shadow-inner text-sm"
                 value={resDate}
                 onChange={(e) => setResDate(e.target.value)}
                 min={new Date().toISOString().split("T")[0]}
               />
             </div>
             <div className="space-y-3 pt-2">
-              <label className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
-                数量設定
+              <label className="text-[10px] font-black opacity-50 uppercase tracking-widest ml-1">
+                予約数量の調整
               </label>
               <div className="space-y-2.5">
                 {reservingItems.map((item) => {
@@ -613,14 +632,14 @@ const ItemsPage = () => {
                   return (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-4 bg-secondary/30 rounded-2xl border border-border/50"
+                      className="flex items-center justify-between p-4 bg-secondary/20 rounded-2xl border border-border/50 shadow-sm"
                     >
-                      <div className="flex-1 pr-4">
-                        <div className="text-xs font-black line-clamp-1">
+                      <div className="flex-1 pr-4 min-w-0">
+                        <div className="text-sm font-black truncate text-foreground">
                           {item.item_name}
                         </div>
-                        <div className="text-[9px] opacity-40 uppercase">
-                          {item.label_no || "-"} | {item.location_name}
+                        <div className="text-[9px] opacity-40 uppercase font-bold truncate">
+                          {item.label_no || "NO LABEL"} | {item.location_name}
                         </div>
                       </div>
                       <div className="flex items-center gap-3 shrink-0">
@@ -628,7 +647,7 @@ const ItemsPage = () => {
                           type="number"
                           min={1}
                           max={eff}
-                          className="w-20 bg-card border border-border rounded-lg p-2 text-center text-sm font-black focus:ring-1 ring-primary outline-none shadow-sm"
+                          className="w-20 bg-card border border-border rounded-xl p-2.5 text-center text-sm font-black focus:ring-1 ring-primary outline-none shadow-sm"
                           value={currentVal === 0 ? "" : currentVal}
                           onChange={(e) =>
                             setResQtyMap({
@@ -641,7 +660,7 @@ const ItemsPage = () => {
                           }
                           onFocus={(e) => e.target.select()}
                         />
-                        <span className="text-[10px] font-bold opacity-30">
+                        <span className="text-[10px] font-black opacity-20">
                           / {eff}
                         </span>
                       </div>
@@ -653,12 +672,12 @@ const ItemsPage = () => {
             <button
               onClick={handleReserveSubmit}
               disabled={submitting || !resDate}
-              className="w-full bg-primary text-black font-black py-4 rounded-2xl shadow-xl hover:opacity-95 active:scale-[0.99] transition-all mt-4 disabled:opacity-30"
+              className="w-full bg-primary text-black font-black py-4 rounded-2xl shadow-xl hover:opacity-95 active:scale-[0.99] transition-all mt-4 disabled:opacity-30 uppercase tracking-tighter"
             >
               {submitting ? (
-                <Loader2 className="h-5 w-5 animate-spin mx-auto" />
+                <Loader2 className="h-6 w-6 animate-spin mx-auto" />
               ) : (
-                "予約を確定する"
+                "この内容で予約を申請する"
               )}
             </button>
           </div>

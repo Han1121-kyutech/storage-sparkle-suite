@@ -10,6 +10,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { sendInventoryNotification } from "@/utils/notificationUtils"; // ★ 通知用関数をインポート
 
 interface ItemFormModalProps {
   open: boolean;
@@ -30,7 +31,6 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
   const [labelNo, setLabelNo] = useState("");
   const [specifications, setSpecifications] = useState("");
 
-  // 権力者（Role 2）専用State
   const [alertThreshold, setAlertThreshold] = useState(5);
   const [category, setCategory] = useState("");
 
@@ -74,10 +74,22 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       specifications: specifications.trim(),
     };
 
-    // Role 2のみが閾値とカテゴリを操作可能。非Role 2の新規登録時はデフォルト値を利用
     if (isRole2) {
-      itemData.alert_threshold = alertThreshold;
-      itemData.category = category.trim() || null;
+      const catTrimmed = category.trim();
+
+      if (catTrimmed.includes(",")) {
+        toast.error("カテゴリ名にカンマ(,)は使用できません");
+        setIsSubmitting(false);
+        return;
+      }
+      if (catTrimmed.length > 20) {
+        toast.error("カテゴリ名は20文字以内にしてください");
+        setIsSubmitting(false);
+        return;
+      }
+
+      itemData.alert_threshold = Math.max(0, alertThreshold);
+      itemData.category = catTrimmed || null;
     } else if (!item) {
       itemData.alert_threshold = 5;
       itemData.category = null;
@@ -108,6 +120,13 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       }
 
       toast.success(item ? "更新しました" : "追加しました");
+
+      // ★ ここでDiscordへ通知を投げる
+      const notifyMsg = item
+        ? `📝 **物品編集**\n名前: ${itemData.item_name}\n保管場所: ${itemData.location_name}\n在庫数: ${itemData.stock_quantity}`
+        : `✨ **新規物品登録**\n名前: ${itemData.item_name}\n保管場所: ${itemData.location_name}\n初期在庫: ${itemData.stock_quantity}`;
+
+      await sendInventoryNotification(notifyMsg);
 
       if (resultData) {
         onSave(resultData);
@@ -228,7 +247,6 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
             </div>
           </div>
 
-          {/* Role 2専用 特権フィールド */}
           {isRole2 && (
             <div className="grid grid-cols-2 gap-4 border-t border-border pt-4 mt-2">
               <div className="space-y-1.5">
@@ -247,15 +265,18 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold uppercase text-primary">
-                  カテゴリ (Role 2限定)
+                  カテゴリ上書き (Role 2限定)
                 </label>
                 <input
                   disabled={isSubmitting}
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   className="w-full px-3 py-2 rounded-md bg-secondary/50 border border-primary/30 text-foreground text-sm focus:ring-1 ring-primary outline-none"
-                  placeholder="例: 消耗品"
+                  placeholder="例: 消耗品 (カンマ不可)"
                 />
+                <p className="text-[9px] text-muted-foreground opacity-70">
+                  ※入力した文字列で現在のカテゴリを完全上書きします。
+                </p>
               </div>
             </div>
           )}

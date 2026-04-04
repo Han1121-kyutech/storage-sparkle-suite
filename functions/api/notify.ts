@@ -2,10 +2,11 @@ export const onRequestPost = async (context: any) => {
   try {
     const { type, message } = await context.request.json();
 
+    // VITE_ はフロントエンド専用だ。バックエンドでは設定した環境変数名をそのまま使う
     const url =
       type === "inventory"
-        ? context.env.VITE_INVENTORY_WEBHOOK_URL
-        : context.env.VITE_REQUEST_WEBHOOK_URL;
+        ? context.env.INVENTORY_WEBHOOK_URL
+        : context.env.REQUEST_WEBHOOK_URL;
 
     if (!url) {
       return new Response(JSON.stringify({ error: "URL undefined" }), {

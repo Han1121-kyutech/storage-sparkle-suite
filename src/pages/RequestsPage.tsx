@@ -80,7 +80,6 @@ const RequestsPage = () => {
   const [memo, setMemo] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // カスタムドロップダウン用のState
   const [isItemSelectOpen, setIsItemSelectOpen] = useState(false);
   const [itemSelectSearch, setItemSelectSearch] = useState("");
 
@@ -106,7 +105,7 @@ const RequestsPage = () => {
         setSelectedItemId(itemRes.data[0].id);
       }
     } catch (error: any) {
-      toast.error("取得失敗: " + error.message);
+      toast.error("同期失敗: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -237,6 +236,7 @@ const RequestsPage = () => {
       ]);
       if (error) throw error;
 
+      // ★ Discordへの新規申請通知（追加）
       await sendRequestNotification(
         `📝 **新規申請 (${typeLabel[requestType]})**\n申請者: ${currentUser.user_name}\n物品: ${targetItem?.item_name} ${targetItem?.label_no ? `[${targetItem.label_no}]` : ""}\n数量: ${reqQty}\n使用予定日: ${scheduledDate || "即時"}\n備考: ${finalMemo || "なし"}`,
       );
@@ -270,8 +270,9 @@ const RequestsPage = () => {
         .update({ status: "returned" })
         .eq("id", request.id);
 
+      // ★ Discordへの返却完了通知（追加）
       await sendRequestNotification(
-        `🔄 **返却完了**\n申請者: ${users.find((u) => String(u.id) === String(request.user_id))?.user_name}\n物品: ${item.item_name}\n数量: ${request.request_quantity}`,
+        `🔄 **返却完了**\n申請者: ${users.find((u) => String(u.id) === String(request.user_id))?.user_name}\n物品: ${item.item_name}\n数量: ${request.request_quantity}\n処理者: ${currentUser?.user_name}`,
       );
 
       toast.success("返却完了");
@@ -292,6 +293,7 @@ const RequestsPage = () => {
 
   const renderRequestTable = (reqData: Request[]) => (
     <div>
+      {/* デスクトップ版表示 */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm text-left min-w-[1000px]">
           <thead className="bg-secondary/30 text-muted-foreground uppercase text-[11px] font-bold">
@@ -422,6 +424,7 @@ const RequestsPage = () => {
         </table>
       </div>
 
+      {/* モバイル版表示 */}
       <div className="md:hidden divide-y divide-border/50">
         {reqData.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground italic text-sm">
@@ -521,7 +524,6 @@ const RequestsPage = () => {
     </div>
   );
 
-  // カスタムドロップダウンの選択中アイテムの表示ロジック
   const renderSelectedItem = () => {
     const item = items.find((i) => i.id === selectedItemId);
     if (!item)
@@ -552,7 +554,6 @@ const RequestsPage = () => {
     );
   };
 
-  // カスタムドロップダウン内の検索とフィルタリング
   const dropdownFilteredItems = useMemo(() => {
     const q = itemSelectSearch.toLowerCase();
     return items.filter(
@@ -580,7 +581,7 @@ const RequestsPage = () => {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
-              placeholder="名前・ラベル・カテゴリ検索..."
+              placeholder="検索..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 pr-4 py-2.5 rounded-lg bg-card border border-border text-foreground text-sm focus:ring-1 ring-primary focus:outline-none w-full sm:w-64 transition-all shadow-sm"
@@ -609,13 +610,12 @@ const RequestsPage = () => {
             <Plus className="h-4 w-4 text-primary" /> 新規申請・予約の作成
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-            {/* ★カスタム・ドロップダウン★ */}
+            {/* カスタムドロップダウン物品選択 */}
             <div className="space-y-1.5 md:col-span-2 lg:col-span-1 relative">
               <label className="text-[11px] font-bold uppercase opacity-50">
                 対象物品
               </label>
 
-              {/* トリガー部分 */}
               <div
                 onClick={() => setIsItemSelectOpen(!isItemSelectOpen)}
                 className="w-full px-3 py-2.5 rounded-lg bg-secondary/50 border border-transparent hover:border-primary/50 text-foreground text-sm cursor-pointer flex justify-between items-center shadow-inner transition-colors"
@@ -624,7 +624,6 @@ const RequestsPage = () => {
                 <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
               </div>
 
-              {/* ドロップダウンメニュー展開部分 */}
               {isItemSelectOpen && (
                 <>
                   <div
