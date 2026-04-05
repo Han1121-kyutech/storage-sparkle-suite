@@ -10,6 +10,10 @@ import {
   ArrowUpDown,
   ChevronUp,
   ChevronDown,
+  Pencil,
+  Check,
+  X,
+  KeyRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { sendInventoryNotification } from "@/utils/notificationUtils";
@@ -33,6 +37,12 @@ const UsersPage = () => {
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const [editingPwdId, setEditingPwdId] = useState<string | null>(null);
+  const [pwdInput, setPwdInput] = useState("");
+
+  const [adminGlobalPwd, setAdminGlobalPwd] = useState("");
+  const [superGlobalPwd, setSuperGlobalPwd] = useState("");
 
   const [sortConfig, setSortConfig] = useState<SortConfig>({
     key: "id",
@@ -100,6 +110,39 @@ const UsersPage = () => {
     );
   };
 
+  const handleBulkPasswordChange = async (role: number, newPwd: string) => {
+    if (!newPwd.trim()) return toast.error("パスワードを入力してください");
+    if (
+      !confirm(
+        `本当にすべての${roleLabels[role]}のパスワードを「${newPwd}」に変更しますか？`,
+      )
+    )
+      return;
+
+    setProcessingId(`bulk-pwd-${role}`);
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({ password: newPwd.trim() })
+        .eq("role", role);
+
+      if (error) throw error;
+
+      await sendInventoryNotification(
+        `🔑 **共通パスワード一括変更**\n対象: ${roleLabels[role]}全員\n実行者: ${currentUser?.user_name}`,
+      );
+
+      toast.success(`すべての${roleLabels[role]}のパスワードを変更しました`);
+      fetchUsers();
+      if (role === 1) setAdminGlobalPwd("");
+      if (role === 2) setSuperGlobalPwd("");
+    } catch (error: any) {
+      toast.error("一括変更に失敗しました: " + error.message);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const handleRoleChange = async (userId: string, newRole: number) => {
     if (userId === String(currentUser?.id)) {
       return toast.error("自分自身の権限は変更できません");
@@ -111,14 +154,23 @@ const UsersPage = () => {
     setProcessingId(userId);
     try {
       const updateData: any = { role: newRole };
+      let pwdMsg = "";
 
-      // ★ パスワード未設定のユーザーを管理者に昇格する場合、初期パスワード「admin123」を強制設定
-      if (
-        newRole >= 1 &&
-        (!(targetUser as any).password ||
-          (targetUser as any).password.trim() === "")
-      ) {
-        updateData.password = "admin123";
+      if (newRole === 1) {
+        const currentAdminPwd =
+          users.find((u) => u.role === 1 && String(u.id) !== userId)
+            ?.password || "admin123";
+        updateData.password = currentAdminPwd;
+        pwdMsg = ` (PW: ${currentAdminPwd} を反映)`;
+      } else if (newRole === 2) {
+        const currentSuperPwd =
+          users.find((u) => u.role === 2 && String(u.id) !== userId)
+            ?.password || "super123";
+        updateData.password = currentSuperPwd;
+        pwdMsg = ` (PW: ${currentSuperPwd} を反映)`;
+      } else {
+        updateData.password = null;
+        pwdMsg = " (PWを初期化)";
       }
 
       const { error } = await supabase
@@ -132,13 +184,34 @@ const UsersPage = () => {
         `👤 **権限変更**\n対象: ${targetUser.user_name}\n新権限: ${roleLabels[newRole]}\n実行者: ${currentUser?.user_name}`,
       );
 
-      toast.success(
-        `${targetUser.user_name} の権限を更新しました。` +
-          (updateData.password ? " (初期PW: admin123 を自動設定しました)" : ""),
-      );
+      toast.success(`${targetUser.user_name} の権限を更新しました。${pwdMsg}`);
       fetchUsers();
     } catch (error: any) {
       toast.error("更新に失敗しました: " + error.message);
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleSavePassword = async (userId: string) => {
+    if (!pwdInput.trim()) {
+      return toast.error("パスワードを入力してください");
+    }
+
+    setProcessingId(userId);
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({ password: pwdInput.trim() })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      toast.success("パスワードを変更しました");
+      setEditingPwdId(null);
+      fetchUsers();
+    } catch (error: any) {
+      toast.error("パスワードの変更に失敗しました: " + error.message);
     } finally {
       setProcessingId(null);
     }
@@ -278,6 +351,55 @@ const UsersPage = () => {
         </button>
       </div>
 
+      {isRole2 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-secondary/10 border border-border p-5 rounded-2xl shadow-sm">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+              <KeyRound className="h-4 w-4 text-primary" />{" "}
+              管理者の共通パスワードを変更
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="新しい管理者PW..."
+                value={adminGlobalPwd}
+                onChange={(e) => setAdminGlobalPwd(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-card outline-none focus:ring-1 ring-primary"
+              />
+              <button
+                onClick={() => handleBulkPasswordChange(1, adminGlobalPwd)}
+                disabled={processingId === "bulk-pwd-1"}
+                className="px-4 py-2 bg-primary text-black text-sm font-black rounded-lg shadow hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+              >
+                一括変更
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+              <KeyRound className="h-4 w-4 text-primary" />{" "}
+              最高管理者の共通パスワードを変更
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="新しい最高管理者PW..."
+                value={superGlobalPwd}
+                onChange={(e) => setSuperGlobalPwd(e.target.value)}
+                className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-card outline-none focus:ring-1 ring-primary"
+              />
+              <button
+                onClick={() => handleBulkPasswordChange(2, superGlobalPwd)}
+                disabled={processingId === "bulk-pwd-2"}
+                className="px-4 py-2 bg-primary text-black text-sm font-black rounded-lg shadow hover:opacity-90 active:scale-95 transition-all disabled:opacity-50"
+              >
+                一括変更
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left min-w-[800px]">
@@ -318,7 +440,7 @@ const UsersPage = () => {
                 </th>
                 <th
                   onClick={() => requestSort("password")}
-                  className="px-4 py-4 w-32 cursor-pointer hover:text-foreground transition-colors group text-center"
+                  className="px-4 py-4 w-48 cursor-pointer hover:text-foreground transition-colors group text-center"
                 >
                   <div className="flex items-center justify-center gap-1">
                     パスワード {getSortIcon("password")}
@@ -334,6 +456,7 @@ const UsersPage = () => {
                 const isMe = String(user.id) === String(currentUser?.id);
                 const isActive = user.is_active !== false;
                 const pwd = (user as any).password;
+                const isEditingPwd = editingPwdId === String(user.id);
 
                 return (
                   <tr
@@ -386,13 +509,55 @@ const UsersPage = () => {
                     </td>
                     <td className="px-4 py-4 text-center">
                       {user.role >= 1 ? (
-                        <span className="font-mono text-xs font-bold text-foreground bg-secondary/50 px-2 py-1 rounded border border-border/50">
-                          {pwd || (
-                            <span className="text-destructive font-sans text-[10px]">
-                              未設定
+                        isEditingPwd ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="text"
+                              value={pwdInput}
+                              onChange={(e) => setPwdInput(e.target.value)}
+                              className="w-24 px-2 py-1 text-xs border border-primary rounded bg-card text-foreground outline-none focus:ring-1 ring-primary"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() =>
+                                handleSavePassword(String(user.id))
+                              }
+                              disabled={processingId === String(user.id)}
+                              className="p-1 text-success hover:bg-success/20 rounded transition-colors"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setEditingPwdId(null)}
+                              disabled={processingId === String(user.id)}
+                              className="p-1 text-destructive hover:bg-destructive/20 rounded transition-colors"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="font-mono text-xs font-bold text-foreground bg-secondary/50 px-2 py-1 rounded border border-border/50">
+                              {pwd || (
+                                <span className="text-destructive font-sans text-[10px]">
+                                  未設定
+                                </span>
+                              )}
                             </span>
-                          )}
-                        </span>
+                            {isRole2 && (
+                              <button
+                                onClick={() => {
+                                  setEditingPwdId(String(user.id));
+                                  setPwdInput(pwd || "");
+                                }}
+                                className="p-1.5 bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 rounded transition-colors"
+                                title="パスワードを変更"
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        )
                       ) : (
                         <span className="text-muted-foreground opacity-30">
                           -
