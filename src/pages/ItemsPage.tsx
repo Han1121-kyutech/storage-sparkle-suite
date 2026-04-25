@@ -25,8 +25,9 @@ import { toast } from "sonner";
 
 // 動的閾値に基づくカラークラス判定
 const getStockColorClass = (quantity: number, threshold: number = 5) => {
+  if (threshold === 0) return "text-success";
   if (quantity >= threshold * 3) return "text-success";
-  if (quantity >= threshold) return "text-warning";
+  if (quantity > threshold) return "text-warning";
   return "text-destructive font-black animate-pulse";
 };
 
@@ -72,6 +73,14 @@ const ItemsPage = () => {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // オートフィル用
+  const [autofillSuggestions, setAutofillSuggestions] = useState<Item[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [autofillLocationOptions, setAutofillLocationOptions] = useState<
+    Item[]
+  >([]);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
+
   const [newItem, setNewItem] = useState({
     item_name: "",
     label_no: "",
@@ -81,6 +90,61 @@ const ItemsPage = () => {
     stock_quantity: 0,
     memo: "",
   });
+
+  // 物品名入力時のサジェスト処理
+  const handleItemNameChange = (value: string) => {
+    setNewItem({ ...newItem, item_name: value });
+    if (value.trim().length === 0) {
+      setAutofillSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    const q = value.toLowerCase();
+    const matched = items.filter((i) => i.item_name.toLowerCase().includes(q));
+    // 物品名でユニーク化
+    const uniqueNames = Array.from(
+      new Map(matched.map((i) => [i.item_name, i])).values(),
+    );
+    setAutofillSuggestions(uniqueNames);
+    setShowSuggestions(uniqueNames.length > 0);
+  };
+
+  // サジェストから物品名を選択したとき
+  const handleSelectSuggestion = (selectedName: string) => {
+    const matched = items.filter((i) => i.item_name === selectedName);
+    setShowSuggestions(false);
+    if (matched.length === 1) {
+      // 拠点が1つならそのまま自動入力
+      const i = matched[0];
+      setNewItem({
+        ...newItem,
+        item_name: i.item_name,
+        label_no: i.label_no || "",
+        specifications: i.specifications || "",
+        location_name: i.location_name,
+        location_no: i.location_no,
+      });
+    } else {
+      // 複数拠点ある場合は拠点選択を表示
+      setNewItem({ ...newItem, item_name: selectedName });
+      setAutofillLocationOptions(matched);
+      setShowLocationPicker(true);
+    }
+  };
+
+  // 拠点選択からオートフィル
+  const handleSelectLocation = (item: Item) => {
+    setNewItem({
+      ...newItem,
+      item_name: item.item_name,
+      label_no: item.label_no || "",
+      specifications: item.specifications || "",
+      location_name: item.location_name,
+      location_no: item.location_no,
+    });
+    setShowLocationPicker(false);
+    setAutofillLocationOptions([]);
+  };
 
   const fetchData = async () => {
     const [itemRes, reqRes] = await Promise.all([
@@ -311,8 +375,16 @@ const ItemsPage = () => {
       groups[i.item_name].total_stock += i.stock_quantity;
       groups[i.item_name].effective_stock += eff;
     });
+    Object.values(groups).forEach((g) => {
+      g.locations.sort((a, b) => {
+        if (!a.label_no && !b.label_no) return a.id - b.id;
+        if (!a.label_no) return 1;
+        if (!b.label_no) return -1;
+        return a.label_no.localeCompare(b.label_no, "ja", { numeric: true });
+      });
+    });
     return Object.values(groups).sort((a, b) =>
-      a.item_name.localeCompare(b.item_name),
+      a.item_name.localeCompare(b.item_name, "ja"),
     );
   }, [items, requests, search, selectedLocation]);
 
@@ -379,7 +451,7 @@ const ItemsPage = () => {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+      <div className="rounded-xl border border-border bg-card overflow-visible shadow-sm">
         <div className="md:hidden">
           <button
             onClick={() => setIsFormOpen(!isFormOpen)}
@@ -396,12 +468,12 @@ const ItemsPage = () => {
           </button>
         </div>
         {(isFormOpen || window.innerWidth > 768) && (
-          <div className="p-5 border-t md:border-t-0 bg-secondary/5">
+          <div className="p-5 border-t md:border-t-0 bg-secondary/5 overflow-visible">
             <form
               onSubmit={handleAddItem}
-              className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs"
+              className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 text-xs overflow-visible"
             >
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 relative overflow-visible">
                 <label className="font-bold opacity-50 uppercase tracking-wider">
                   物品名
                 </label>
@@ -410,12 +482,83 @@ const ItemsPage = () => {
                   required
                   value={newItem.item_name}
                   disabled={submitting}
-                  placeholder="物品の名称"
+                  placeholder="物品の名称（入力でサジェスト）"
                   className="w-full bg-card p-2.5 rounded-lg outline-none border border-border focus:ring-1 ring-primary transition-all"
-                  onChange={(e) =>
-                    setNewItem({ ...newItem, item_name: e.target.value })
+                  onChange={(e) => handleItemNameChange(e.target.value)}
+                  onBlur={() =>
+                    setTimeout(() => setShowSuggestions(false), 150)
                   }
+                  onFocus={() => {
+                    if (autofillSuggestions.length > 0)
+                      setShowSuggestions(true);
+                  }}
+                  autoComplete="off"
                 />
+                {/* サジェストドロップダウン */}
+                {showSuggestions && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-secondary/50 border-b border-border sticky top-0">
+                      既存の物品からオートフィル
+                    </div>
+                    {autofillSuggestions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onMouseDown={() =>
+                          handleSelectSuggestion(item.item_name)
+                        }
+                        className="w-full text-left px-3 py-2.5 hover:bg-primary/10 transition-colors flex items-center justify-between gap-2 group"
+                      >
+                        <span className="font-bold text-sm text-foreground group-hover:text-primary">
+                          {item.item_name}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {item.location_name}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {/* 複数拠点ピッカー */}
+                {showLocationPicker && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-primary/30 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wider bg-primary/5 border-b border-border flex items-center justify-between sticky top-0">
+                      <span>拠点を選択してオートフィル</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowLocationPicker(false)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {autofillLocationOptions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleSelectLocation(item)}
+                        className="w-full text-left px-3 py-2.5 hover:bg-primary/10 transition-colors flex items-center gap-3 group"
+                      >
+                        <div>
+                          <div className="font-bold text-sm text-foreground group-hover:text-primary">
+                            {item.location_name}
+                            <span className="font-mono text-primary bg-primary/5 px-1 rounded border border-primary/10 ml-2 text-[10px]">
+                              {item.location_no}
+                            </span>
+                          </div>
+                          {item.label_no && (
+                            <div className="text-[10px] text-muted-foreground mt-0.5">
+                              ラベル: {item.label_no}
+                              {item.specifications
+                                ? ` / ${item.specifications}`
+                                : ""}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <label className="font-bold opacity-50 uppercase tracking-wider">
@@ -545,7 +688,7 @@ const ItemsPage = () => {
                           {group.category}
                         </span>
                       )}
-                      <div className="text-base font-black uppercase tracking-tight text-foreground">
+                      <div className="text-base font-black tracking-tight text-foreground">
                         {group.item_name}
                       </div>
                     </div>

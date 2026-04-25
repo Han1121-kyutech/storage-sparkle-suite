@@ -10,6 +10,8 @@ import {
   CheckCircle,
   Loader2,
   ChevronRight,
+  ChevronLeft,
+  Search,
   MapPin,
   Clock,
   User as UserIcon,
@@ -23,6 +25,9 @@ const DashboardPage = () => {
   const [requests, setRequests] = useState<Request[]>([]);
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<any[]>([]);
+  const [lowStockSearch, setLowStockSearch] = useState("");
+  const [lowStockPage, setLowStockPage] = useState(1);
+  const LOW_STOCK_PAGE_SIZE = 10;
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -58,7 +63,30 @@ const DashboardPage = () => {
     : requests.filter((r) => String(r.user_id) === String(currentUser?.id));
 
   const lowStockItems = items.filter(
-    (i) => i.stock_quantity < (i.alert_threshold ?? 5),
+    (i) =>
+      (i.alert_threshold ?? 5) > 0 &&
+      i.stock_quantity <= (i.alert_threshold ?? 5),
+  );
+
+  const filteredLowStockItems = useMemo(() => {
+    const q = lowStockSearch.toLowerCase();
+    if (!q) return lowStockItems;
+    return lowStockItems.filter(
+      (i) =>
+        i.item_name.toLowerCase().includes(q) ||
+        i.location_name.toLowerCase().includes(q) ||
+        (i.label_no && i.label_no.toLowerCase().includes(q)) ||
+        (i.category && i.category.toLowerCase().includes(q)),
+    );
+  }, [lowStockItems, lowStockSearch]);
+
+  const lowStockTotalPages = Math.max(
+    1,
+    Math.ceil(filteredLowStockItems.length / LOW_STOCK_PAGE_SIZE),
+  );
+  const pagedLowStockItems = filteredLowStockItems.slice(
+    (lowStockPage - 1) * LOW_STOCK_PAGE_SIZE,
+    lowStockPage * LOW_STOCK_PAGE_SIZE,
   );
 
   const pendingRequests = targetRequests.filter((r) => r.status === "pending");
@@ -241,6 +269,9 @@ const DashboardPage = () => {
             <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive animate-pulse" />
               在庫が少ない物品
+              <span className="text-xs font-mono bg-destructive/10 text-destructive px-2 py-0.5 rounded-full">
+                {filteredLowStockItems.length}件
+              </span>
             </h3>
             <button
               onClick={() => navigate(isAdmin ? "/admin" : "/items")}
@@ -249,6 +280,22 @@ const DashboardPage = () => {
               詳細を見る <ChevronRight className="h-3 w-3" />
             </button>
           </div>
+
+          {/* 検索窓 */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="物品名・保管場所・ラベル・カテゴリで絞り込み..."
+              value={lowStockSearch}
+              onChange={(e) => {
+                setLowStockSearch(e.target.value);
+                setLowStockPage(1);
+              }}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-card border border-border text-sm outline-none focus:ring-1 ring-primary shadow-sm"
+            />
+          </div>
+
           <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
@@ -261,58 +308,206 @@ const DashboardPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
-                  {lowStockItems.map((item) => (
-                    <tr
-                      key={item.id}
-                      onClick={() => navigate(isAdmin ? "/admin" : "/items")}
-                      className="hover:bg-secondary/30 transition-colors cursor-pointer group"
-                    >
-                      <td className="px-4 py-3 font-mono text-[10px] opacity-50">
-                        #{item.id}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          {item.category && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
-                              {item.category}
+                  {pagedLowStockItems.length > 0 ? (
+                    pagedLowStockItems.map((item) => (
+                      <tr
+                        key={item.id}
+                        onClick={() => navigate(isAdmin ? "/admin" : "/items")}
+                        className="hover:bg-secondary/30 transition-colors cursor-pointer group"
+                      >
+                        <td className="px-4 py-3 font-mono text-[10px] opacity-50">
+                          #{item.id}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {item.category && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/10 text-primary border border-primary/20 shrink-0">
+                                {item.category}
+                              </span>
+                            )}
+                            <span className="font-bold text-foreground group-hover:text-primary transition-colors">
+                              {item.item_name}
                             </span>
-                          )}
-                          <span className="font-bold text-foreground group-hover:text-primary transition-colors">
-                            {item.item_name}
-                          </span>
-                        </div>
-                        <div className="text-[10px] mt-1 flex items-center gap-2">
-                          {item.label_no && (
-                            <span className="bg-secondary px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground">
-                              {item.label_no}
+                          </div>
+                          <div className="text-[10px] mt-1 flex items-center gap-2">
+                            {item.label_no && (
+                              <span className="bg-secondary px-1.5 py-0.5 rounded font-mono border border-border/50 text-muted-foreground">
+                                {item.label_no}
+                              </span>
+                            )}
+                            <span className="italic text-muted-foreground">
+                              {item.specifications || "-"}
                             </span>
-                          )}
-                          <span className="italic text-muted-foreground">
-                            {item.specifications || "-"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          <div className="flex items-center gap-1 opacity-80">
+                            <MapPin className="h-3 w-3" /> {item.location_name}
+                          </div>
+                          <div className="font-mono text-[10px] bg-secondary/50 inline-block px-1 rounded mt-1 opacity-70">
+                            #{item.location_no}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-mono text-lg text-destructive font-black">
+                            {item.stock_quantity}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs">
-                        <div className="flex items-center gap-1 opacity-80">
-                          <MapPin className="h-3 w-3" /> {item.location_name}
-                        </div>
-                        <div className="font-mono text-[10px] bg-secondary/50 inline-block px-1 rounded mt-1 opacity-70">
-                          #{item.location_no}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className="font-mono text-lg text-destructive font-black">
-                          {item.stock_quantity}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground ml-1">
-                          / {item.alert_threshold ?? 5}
-                        </span>
+                          <span className="text-[10px] text-muted-foreground ml-1">
+                            / {item.alert_threshold ?? 5}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-4 py-8 text-center text-sm text-muted-foreground"
+                      >
+                        該当する物品が見つかりません
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
+
+            {/* ページネーション */}
+            {lowStockTotalPages > 1 &&
+              (() => {
+                // 現在ページを中心に最大5ページ分のウィンドウを計算
+                const WINDOW = 5;
+                let start = Math.max(1, lowStockPage - Math.floor(WINDOW / 2));
+                let end = start + WINDOW - 1;
+                if (end > lowStockTotalPages) {
+                  end = lowStockTotalPages;
+                  start = Math.max(1, end - WINDOW + 1);
+                }
+                const pageWindow = Array.from(
+                  { length: end - start + 1 },
+                  (_, i) => start + i,
+                );
+
+                return (
+                  <div className="relative flex items-center justify-between gap-3 px-5 py-4 border-t border-border/50 bg-secondary/10">
+                    {/* 件数表示（左） */}
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {(lowStockPage - 1) * LOW_STOCK_PAGE_SIZE + 1}–
+                      {Math.min(
+                        lowStockPage * LOW_STOCK_PAGE_SIZE,
+                        filteredLowStockItems.length,
+                      )}{" "}
+                      / {filteredLowStockItems.length}件
+                    </span>
+
+                    <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+                      {/* 前へ */}
+                      <button
+                        onClick={() =>
+                          setLowStockPage((p) => Math.max(1, p - 1))
+                        }
+                        disabled={lowStockPage === 1}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg border border-border bg-card hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" /> 前へ
+                      </button>
+
+                      {/* 先頭ページ + 省略 */}
+                      {start > 1 && (
+                        <>
+                          <button
+                            onClick={() => setLowStockPage(1)}
+                            className="min-w-[38px] h-9 rounded-lg text-xs font-bold border border-border bg-card hover:bg-secondary text-muted-foreground transition-all"
+                          >
+                            1
+                          </button>
+                          {start > 2 && (
+                            <span className="text-muted-foreground text-sm px-1">
+                              …
+                            </span>
+                          )}
+                        </>
+                      )}
+
+                      {/* ページウィンドウ */}
+                      {pageWindow.map((page) => (
+                        <button
+                          key={page}
+                          onClick={() => setLowStockPage(page)}
+                          className={`min-w-[38px] h-9 rounded-lg text-xs font-bold border transition-all ${
+                            page === lowStockPage
+                              ? "bg-primary text-black border-primary shadow-md"
+                              : "bg-card border-border hover:bg-secondary text-muted-foreground"
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      ))}
+
+                      {/* 末尾ページ + 省略 */}
+                      {end < lowStockTotalPages && (
+                        <>
+                          {end < lowStockTotalPages - 1 && (
+                            <span className="text-muted-foreground text-sm px-1">
+                              …
+                            </span>
+                          )}
+                          <button
+                            onClick={() => setLowStockPage(lowStockTotalPages)}
+                            className="min-w-[38px] h-9 rounded-lg text-xs font-bold border border-border bg-card hover:bg-secondary text-muted-foreground transition-all"
+                          >
+                            {lowStockTotalPages}
+                          </button>
+                        </>
+                      )}
+
+                      {/* 次へ */}
+                      <button
+                        onClick={() =>
+                          setLowStockPage((p) =>
+                            Math.min(lowStockTotalPages, p + 1),
+                          )
+                        }
+                        disabled={lowStockPage === lowStockTotalPages}
+                        className="flex items-center gap-1 px-3 py-2 rounded-lg border border-border bg-card hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+                      >
+                        次へ <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+
+                      {/* ページ直接入力 */}
+                      <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-border/50">
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                          ページ:
+                        </span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={lowStockTotalPages}
+                          value={lowStockPage}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (v >= 1 && v <= lowStockTotalPages)
+                              setLowStockPage(v);
+                          }}
+                          className="w-14 h-9 text-center text-xs font-bold font-mono border border-border rounded-lg bg-card outline-none focus:ring-1 ring-primary transition-all"
+                        />
+                        <span className="text-[11px] text-muted-foreground">
+                          / {lowStockTotalPages}
+                        </span>
+                      </div>
+                    </div>
+                    {/* 右側スペーサー（件数と対称） */}
+                    <div className="invisible text-xs font-mono">
+                      {(lowStockPage - 1) * LOW_STOCK_PAGE_SIZE + 1}–
+                      {Math.min(
+                        lowStockPage * LOW_STOCK_PAGE_SIZE,
+                        filteredLowStockItems.length,
+                      )}{" "}
+                      / {filteredLowStockItems.length}件
+                    </div>
+                  </div>
+                );
+              })()}
           </div>
         </div>
       )}

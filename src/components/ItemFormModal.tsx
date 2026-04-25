@@ -17,9 +17,16 @@ interface ItemFormModalProps {
   onClose: () => void;
   onSave: (item?: Item) => void;
   item?: Item | null;
+  items?: Item[]; // オートフィル用
 }
 
-const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
+const ItemFormModal = ({
+  open,
+  onClose,
+  onSave,
+  item,
+  items = [],
+}: ItemFormModalProps) => {
   const { currentUser } = useAuth();
   const isRole2 = currentUser?.role === 2;
 
@@ -35,6 +42,14 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
   const [category, setCategory] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // オートフィル用
+  const [autofillSuggestions, setAutofillSuggestions] = useState<Item[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [autofillLocationOptions, setAutofillLocationOptions] = useState<
+    Item[]
+  >([]);
+  const [showLocationPicker, setShowLocationPicker] = useState(false);
 
   useEffect(() => {
     if (item) {
@@ -59,6 +74,50 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
       setCategory("");
     }
   }, [item, open]);
+
+  // 物品名入力時のサジェスト処理
+  const handleItemNameChange = (value: string) => {
+    setItemName(value);
+    if (value.trim().length === 0) {
+      setAutofillSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    const q = value.toLowerCase();
+    const matched = items.filter((i) => i.item_name.toLowerCase().includes(q));
+    const uniqueNames = Array.from(
+      new Map(matched.map((i) => [i.item_name, i])).values(),
+    );
+    setAutofillSuggestions(uniqueNames);
+    setShowSuggestions(uniqueNames.length > 0);
+  };
+
+  const handleSelectSuggestion = (selectedName: string) => {
+    const matched = items.filter((i) => i.item_name === selectedName);
+    setShowSuggestions(false);
+    if (matched.length === 1) {
+      const i = matched[0];
+      setItemName(i.item_name);
+      setLabelNo(i.label_no || "");
+      setSpecifications(i.specifications || "");
+      setLocationName(i.location_name);
+      setLocationNo(i.location_no);
+    } else {
+      setItemName(selectedName);
+      setAutofillLocationOptions(matched);
+      setShowLocationPicker(true);
+    }
+  };
+
+  const handleSelectLocation = (i: Item) => {
+    setItemName(i.item_name);
+    setLabelNo(i.label_no || "");
+    setSpecifications(i.specifications || "");
+    setLocationName(i.location_name);
+    setLocationNo(i.location_no);
+    setShowLocationPicker(false);
+    setAutofillLocationOptions([]);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,7 +214,7 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 relative">
             <label
               htmlFor="itemName"
               className="text-[11px] font-bold uppercase opacity-50"
@@ -167,9 +226,76 @@ const ItemFormModal = ({ open, onClose, onSave, item }: ItemFormModalProps) => {
               required
               disabled={isSubmitting}
               value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
+              autoComplete="off"
+              onChange={(e) => handleItemNameChange(e.target.value)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              onFocus={() => {
+                if (autofillSuggestions.length > 0) setShowSuggestions(true);
+              }}
               className="w-full px-3 py-2 rounded-md bg-secondary border border-border text-foreground text-sm focus:ring-1 ring-primary outline-none"
+              placeholder={!item ? "入力でサジェスト表示" : undefined}
             />
+            {/* サジェストドロップダウン（新規登録時のみ） */}
+            {!item && showSuggestions && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-xl shadow-xl overflow-hidden max-h-48 overflow-y-auto">
+                <div className="px-3 py-1.5 text-[10px] font-bold text-muted-foreground uppercase tracking-wider bg-secondary/50 border-b border-border">
+                  既存の物品からオートフィル
+                </div>
+                {autofillSuggestions.map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onMouseDown={() => handleSelectSuggestion(i.item_name)}
+                    className="w-full text-left px-3 py-2.5 hover:bg-primary/10 transition-colors flex items-center justify-between gap-2 group"
+                  >
+                    <span className="font-bold text-sm text-foreground group-hover:text-primary">
+                      {i.item_name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">
+                      {i.location_name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* 複数拠点ピッカー（新規登録時のみ） */}
+            {!item && showLocationPicker && (
+              <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-primary/30 rounded-xl shadow-xl overflow-hidden">
+                <div className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wider bg-primary/5 border-b border-border flex items-center justify-between">
+                  <span>拠点を選択してオートフィル</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowLocationPicker(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {autofillLocationOptions.map((i) => (
+                  <button
+                    key={i.id}
+                    type="button"
+                    onClick={() => handleSelectLocation(i)}
+                    className="w-full text-left px-3 py-2.5 hover:bg-primary/10 transition-colors flex items-center gap-3 group"
+                  >
+                    <div>
+                      <div className="font-bold text-sm text-foreground group-hover:text-primary">
+                        {i.location_name}
+                        <span className="font-mono text-primary bg-primary/5 px-1 rounded border border-primary/10 ml-2 text-[10px]">
+                          {i.location_no}
+                        </span>
+                      </div>
+                      {i.label_no && (
+                        <div className="text-[10px] text-muted-foreground mt-0.5">
+                          ラベル: {i.label_no}
+                          {i.specifications ? ` / ${i.specifications}` : ""}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">

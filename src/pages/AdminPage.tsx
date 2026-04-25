@@ -17,6 +17,7 @@ import {
   ChevronUp,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   MapPin,
   Search,
   FileDown,
@@ -40,8 +41,9 @@ import { toast } from "sonner";
 
 // 動的閾値に基づくカラークラス判定
 const getStockColorClass = (quantity: number, threshold: number = 5) => {
+  if (threshold === 0) return "text-success";
   if (quantity >= threshold * 3) return "text-success";
-  if (quantity >= threshold) return "text-warning";
+  if (quantity > threshold) return "text-warning";
   return "text-destructive font-black animate-pulse";
 };
 
@@ -121,6 +123,12 @@ const AdminPage = () => {
   const [items, setItems] = useState<Item[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ページネーション
+  const PAGE_SIZE = 10;
+  const [itemPage, setItemPage] = useState(1);
+  const [pendingPage, setPendingPage] = useState(1);
+  const [processedPage, setProcessedPage] = useState(1);
 
   const [isItemsDatabaseOpen, setIsItemsDatabaseOpen] = useState(
     window.innerWidth > 1024,
@@ -323,6 +331,15 @@ const AdminPage = () => {
     });
   }, [items, itemSort, itemSearch, selectedLocFilter]);
 
+  const itemTotalPages = Math.max(
+    1,
+    Math.ceil(groupedItems.length / PAGE_SIZE),
+  );
+  const pagedGroupedItems = groupedItems.slice(
+    (itemPage - 1) * PAGE_SIZE,
+    itemPage * PAGE_SIZE,
+  );
+
   const requestGroups = useMemo(() => {
     const groups: Record<string, RequestGroup> = {};
     requests.forEach((r) => {
@@ -366,6 +383,24 @@ const AdminPage = () => {
   );
   const processedGroups = filteredGroups.filter((g) =>
     g.requests.every((r) => r.status !== "pending"),
+  );
+
+  const pendingTotalPages = Math.max(
+    1,
+    Math.ceil(pendingGroups.length / PAGE_SIZE),
+  );
+  const pagedPendingGroups = pendingGroups.slice(
+    (pendingPage - 1) * PAGE_SIZE,
+    pendingPage * PAGE_SIZE,
+  );
+
+  const processedTotalPages = Math.max(
+    1,
+    Math.ceil(processedGroups.length / PAGE_SIZE),
+  );
+  const pagedProcessedGroups = processedGroups.slice(
+    (processedPage - 1) * PAGE_SIZE,
+    processedPage * PAGE_SIZE,
   );
 
   // グループ全体の一括更新
@@ -506,208 +541,331 @@ const AdminPage = () => {
     });
   };
 
-  const renderRequestTable = (groups: RequestGroup[]) => (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm text-left min-w-[1000px]">
-        <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
-          <tr>
-            <th className="px-4 py-4 w-12 text-center">#</th>
-            <th className="px-4 py-4 w-44">日時</th>
-            <th className="px-4 py-4 w-40">申請者</th>
-            <th className="px-4 py-4">内容</th>
-            <th className="px-4 py-4 text-center">操作</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/30">
-          {groups.map((g) => {
-            const user = users.find((u) => String(u.id) === String(g.user_id));
-            const isExpanded = expandedGroups.has(g.groupId);
-            const isPending = g.requests.some((r) => r.status === "pending");
-            const hasApproveCheckout = g.requests.some(
-              (r) => r.status === "approved" && r.request_type === "checkout",
-            );
+  // ページネーションUI共通コンポーネント
+  const renderPagination = (
+    currentPage: number,
+    totalPages: number,
+    setPage: (p: number) => void,
+    totalCount: number,
+  ) => {
+    if (totalPages <= 1) return null;
+    const WINDOW = 5;
+    let start = Math.max(1, currentPage - Math.floor(WINDOW / 2));
+    let end = start + WINDOW - 1;
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(1, end - WINDOW + 1);
+    }
+    const pageWindow = Array.from(
+      { length: end - start + 1 },
+      (_, i) => start + i,
+    );
+    return (
+      <div className="relative flex items-center justify-between gap-3 px-5 py-4 border-t border-border/50 bg-secondary/10">
+        <span className="text-xs text-muted-foreground font-mono">
+          {(currentPage - 1) * PAGE_SIZE + 1}–
+          {Math.min(currentPage * PAGE_SIZE, totalCount)} / {totalCount}件
+        </span>
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+          <button
+            onClick={() => setPage(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+            className="flex items-center gap-1 px-3 py-2 rounded-lg border border-border bg-card hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" /> 前へ
+          </button>
+          {start > 1 && (
+            <>
+              <button
+                onClick={() => setPage(1)}
+                className="min-w-[38px] h-9 rounded-lg text-xs font-bold border border-border bg-card hover:bg-secondary text-muted-foreground transition-all"
+              >
+                1
+              </button>
+              {start > 2 && (
+                <span className="text-muted-foreground text-sm px-1">…</span>
+              )}
+            </>
+          )}
+          {pageWindow.map((page) => (
+            <button
+              key={page}
+              onClick={() => setPage(page)}
+              className={`min-w-[38px] h-9 rounded-lg text-xs font-bold border transition-all ${page === currentPage ? "bg-primary text-black border-primary shadow-md" : "bg-card border-border hover:bg-secondary text-muted-foreground"}`}
+            >
+              {page}
+            </button>
+          ))}
+          {end < totalPages && (
+            <>
+              {end < totalPages - 1 && (
+                <span className="text-muted-foreground text-sm px-1">…</span>
+              )}
+              <button
+                onClick={() => setPage(totalPages)}
+                className="min-w-[38px] h-9 rounded-lg text-xs font-bold border border-border bg-card hover:bg-secondary text-muted-foreground transition-all"
+              >
+                {totalPages}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+            className="flex items-center gap-1 px-3 py-2 rounded-lg border border-border bg-card hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all text-xs font-bold"
+          >
+            次へ <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+          <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-border/50">
+            <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+              ページ:
+            </span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages}
+              value={currentPage}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                if (v >= 1 && v <= totalPages) setPage(v);
+              }}
+              className="w-14 h-9 text-center text-xs font-bold font-mono border border-border rounded-lg bg-card outline-none focus:ring-1 ring-primary transition-all"
+            />
+            <span className="text-[11px] text-muted-foreground">
+              / {totalPages}
+            </span>
+          </div>
+        </div>
+        <div className="invisible text-xs font-mono">
+          {(currentPage - 1) * PAGE_SIZE + 1}–
+          {Math.min(currentPage * PAGE_SIZE, totalCount)} / {totalCount}件
+        </div>
+      </div>
+    );
+  };
 
-            return (
-              <React.Fragment key={g.groupId}>
-                <tr
-                  className={`hover:bg-secondary/20 transition-colors cursor-pointer ${g.isBulk ? "bg-primary/5 border-l-4 border-primary" : ""}`}
-                  onClick={() => toggleGroup(g.groupId)}
-                >
-                  <td className="px-4 py-4 text-center">
-                    {g.isBulk ? (
-                      isExpanded ? (
-                        <ChevronDown className="h-4 w-4 text-primary" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4 opacity-30" />
-                      )
-                    ) : (
-                      <FileText className="h-4 w-4 opacity-20" />
-                    )}
-                  </td>
-                  <td className="px-4 py-4 text-[10px] font-mono">
-                    {new Date(g.created_at).toLocaleString("ja-JP")}
-                  </td>
-                  <td className="px-4 py-4 font-bold">
-                    {user?.user_name || "不明"}
-                  </td>
-                  <td className="px-4 py-4">
-                    {g.isBulk ? (
-                      <span className="text-xs italic text-muted-foreground flex items-center gap-2 font-bold">
-                        <Layers className="h-3 w-3 text-primary" /> 一括申請 (
-                        {g.requests.length}件)
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`px-2 py-0.5 rounded border text-[9px] font-bold ${typeStyle[g.requests[0].request_type || "checkout"]}`}
-                        >
-                          {typeLabel[g.requests[0].request_type || "checkout"]}
-                        </span>
-                        <span className="font-bold text-foreground">
-                          {
-                            items.find((i) => i.id === g.requests[0].item_id)
-                              ?.item_name
-                          }
-                          <span className="text-primary font-mono ml-1">
-                            x{g.requests[0].request_quantity}
-                          </span>
-                        </span>
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-4 text-center">
-                    <div
-                      className="flex justify-center gap-2 items-center"
-                      onClick={(e) => e.stopPropagation()}
+  const renderRequestTable = (
+    groups: RequestGroup[],
+    currentPage: number,
+    totalPages: number,
+    setPage: (p: number) => void,
+  ) => {
+    return (
+      <>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left min-w-[1000px]">
+            <thead className="bg-secondary/50 text-muted-foreground uppercase text-[11px] font-bold">
+              <tr>
+                <th className="px-4 py-4 w-12 text-center">#</th>
+                <th className="px-4 py-4 w-44">日時</th>
+                <th className="px-4 py-4 w-40">申請者</th>
+                <th className="px-4 py-4">内容</th>
+                <th className="px-4 py-4 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/30">
+              {groups.map((g) => {
+                const user = users.find(
+                  (u) => String(u.id) === String(g.user_id),
+                );
+                const isExpanded = expandedGroups.has(g.groupId);
+                const isPending = g.requests.some(
+                  (r) => r.status === "pending",
+                );
+                const hasApproveCheckout = g.requests.some(
+                  (r) =>
+                    r.status === "approved" && r.request_type === "checkout",
+                );
+
+                return (
+                  <React.Fragment key={g.groupId}>
+                    <tr
+                      className={`hover:bg-secondary/20 transition-colors cursor-pointer ${g.isBulk ? "bg-primary/5 border-l-4 border-primary" : ""}`}
+                      onClick={() => toggleGroup(g.groupId)}
                     >
-                      {isPending && (
-                        <>
-                          {g.isBulk && (
-                            <span className="text-[9px] font-bold text-muted-foreground mr-1">
-                              一括操作:
-                            </span>
-                          )}
-                          <button
-                            onClick={() => updateBulkStatus(g, "approved")}
-                            className="px-4 py-1 bg-success text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                          >
-                            承認
-                          </button>
-                          <button
-                            onClick={() => updateBulkStatus(g, "rejected")}
-                            className="px-3 py-1 bg-destructive text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                          >
-                            却下
-                          </button>
-                        </>
-                      )}
-                      {!isPending && hasApproveCheckout && (
-                        <>
-                          {g.isBulk && (
-                            <span className="text-[9px] font-bold text-muted-foreground mr-1">
-                              一括操作:
-                            </span>
-                          )}
-                          <button
-                            onClick={() => updateBulkStatus(g, "returned")}
-                            className="px-4 py-1 bg-info text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
-                          >
-                            返却
-                          </button>
-                        </>
-                      )}
-                      {!isPending && !hasApproveCheckout && (
-                        <span className="px-2 py-1 rounded border text-[9px] font-black uppercase bg-secondary text-muted-foreground">
-                          処理完了
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-                {isExpanded &&
-                  g.requests.map((r) => {
-                    const itm = items.find((i) => i.id === r.item_id);
-                    return (
-                      <tr key={r.id} className="bg-secondary/5 text-xs">
-                        <td className="px-4 py-2"></td>
-                        <td className="px-4 py-2 font-mono text-[9px] opacity-40">
-                          SUB: #{r.id}
-                        </td>
-                        <td className="px-4 py-2"></td>
-                        <td className="px-4 py-2 border-l-2 border-primary/20">
-                          <div className="flex items-center gap-3">
+                      <td className="px-4 py-4 text-center">
+                        {g.isBulk ? (
+                          isExpanded ? (
+                            <ChevronDown className="h-4 w-4 text-primary" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4 opacity-30" />
+                          )
+                        ) : (
+                          <FileText className="h-4 w-4 opacity-20" />
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-[10px] font-mono">
+                        {new Date(g.created_at).toLocaleString("ja-JP")}
+                      </td>
+                      <td className="px-4 py-4 font-bold">
+                        {user?.user_name || "不明"}
+                      </td>
+                      <td className="px-4 py-4">
+                        {g.isBulk ? (
+                          <span className="text-xs italic text-muted-foreground flex items-center gap-2 font-bold">
+                            <Layers className="h-3 w-3 text-primary" /> 一括申請
+                            ({g.requests.length}件)
+                          </span>
+                        ) : (
+                          <div className="flex items-center gap-2">
                             <span
-                              className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${typeStyle[r.request_type || "checkout"]}`}
+                              className={`px-2 py-0.5 rounded border text-[9px] font-bold ${typeStyle[g.requests[0].request_type || "checkout"]}`}
                             >
-                              {typeLabel[r.request_type || "checkout"]}
+                              {
+                                typeLabel[
+                                  g.requests[0].request_type || "checkout"
+                                ]
+                              }
                             </span>
-                            <span className="font-bold">
-                              {itm?.item_name}{" "}
+                            <span className="font-bold text-foreground">
+                              {
+                                items.find(
+                                  (i) => i.id === g.requests[0].item_id,
+                                )?.item_name
+                              }
                               <span className="text-primary font-mono ml-1">
-                                x{r.request_quantity}
+                                x{g.requests[0].request_quantity}
                               </span>
                             </span>
-                            <span className="text-[10px] italic opacity-60">
-                              (保管: {itm?.location_name})
-                            </span>
                           </div>
-                          <div className="text-[10px] text-muted-foreground mt-1">
-                            備考: {r.memo || "-"}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 text-center border-l border-border/10">
-                          <div className="flex justify-center gap-1">
-                            {r.status === "pending" ? (
-                              <>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    updateSingleStatus(r, "approved");
-                                  }}
-                                  className="px-2.5 py-1 bg-success/20 text-success border border-success/30 hover:bg-success hover:text-white rounded text-[10px] font-black transition-all"
-                                >
-                                  個別承認
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    updateSingleStatus(r, "rejected");
-                                  }}
-                                  className="px-2.5 py-1 bg-destructive/20 text-destructive border border-destructive/30 hover:bg-destructive hover:text-white rounded text-[10px] font-black transition-all"
-                                >
-                                  却下
-                                </button>
-                              </>
-                            ) : r.status === "approved" &&
-                              r.request_type === "checkout" ? (
+                        )}
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <div
+                          className="flex justify-center gap-2 items-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {isPending && (
+                            <>
+                              {g.isBulk && (
+                                <span className="text-[9px] font-bold text-muted-foreground mr-1">
+                                  一括操作:
+                                </span>
+                              )}
                               <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateSingleStatus(r, "returned");
-                                }}
-                                className="px-2.5 py-1 bg-info/20 text-info border border-info/30 hover:bg-info hover:text-white rounded text-[10px] font-black transition-all"
+                                onClick={() => updateBulkStatus(g, "approved")}
+                                className="px-4 py-1 bg-success text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
                               >
-                                個別返却
+                                承認
                               </button>
-                            ) : (
-                              <span
-                                className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${statusStyle[r.status]}`}
+                              <button
+                                onClick={() => updateBulkStatus(g, "rejected")}
+                                className="px-3 py-1 bg-destructive text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
                               >
-                                {statusLabel[r.status]}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </React.Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
+                                却下
+                              </button>
+                            </>
+                          )}
+                          {!isPending && hasApproveCheckout && (
+                            <>
+                              {g.isBulk && (
+                                <span className="text-[9px] font-bold text-muted-foreground mr-1">
+                                  一括操作:
+                                </span>
+                              )}
+                              <button
+                                onClick={() => updateBulkStatus(g, "returned")}
+                                className="px-4 py-1 bg-info text-white rounded text-[10px] font-black shadow-md hover:scale-105 transition-all"
+                              >
+                                返却
+                              </button>
+                            </>
+                          )}
+                          {!isPending && !hasApproveCheckout && (
+                            <span className="px-2 py-1 rounded border text-[9px] font-black uppercase bg-secondary text-muted-foreground">
+                              処理完了
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded &&
+                      g.requests.map((r) => {
+                        const itm = items.find((i) => i.id === r.item_id);
+                        return (
+                          <tr key={r.id} className="bg-secondary/5 text-xs">
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 font-mono text-[9px] opacity-40">
+                              SUB: #{r.id}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 border-l-2 border-primary/20">
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded border text-[8px] font-black ${typeStyle[r.request_type || "checkout"]}`}
+                                >
+                                  {typeLabel[r.request_type || "checkout"]}
+                                </span>
+                                <span className="font-bold">
+                                  {itm?.item_name}{" "}
+                                  <span className="text-primary font-mono ml-1">
+                                    x{r.request_quantity}
+                                  </span>
+                                </span>
+                                <span className="text-[10px] italic opacity-60">
+                                  (保管: {itm?.location_name})
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-muted-foreground mt-1">
+                                備考: {r.memo || "-"}
+                              </div>
+                            </td>
+                            <td className="px-4 py-2 text-center border-l border-border/10">
+                              <div className="flex justify-center gap-1">
+                                {r.status === "pending" ? (
+                                  <>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateSingleStatus(r, "approved");
+                                      }}
+                                      className="px-2.5 py-1 bg-success/20 text-success border border-success/30 hover:bg-success hover:text-white rounded text-[10px] font-black transition-all"
+                                    >
+                                      個別承認
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        updateSingleStatus(r, "rejected");
+                                      }}
+                                      className="px-2.5 py-1 bg-destructive/20 text-destructive border border-destructive/30 hover:bg-destructive hover:text-white rounded text-[10px] font-black transition-all"
+                                    >
+                                      却下
+                                    </button>
+                                  </>
+                                ) : r.status === "approved" &&
+                                  r.request_type === "checkout" ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateSingleStatus(r, "returned");
+                                    }}
+                                    className="px-2.5 py-1 bg-info/20 text-info border border-info/30 hover:bg-info hover:text-white rounded text-[10px] font-black transition-all"
+                                  >
+                                    個別返却
+                                  </button>
+                                ) : (
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${statusStyle[r.status]}`}
+                                  >
+                                    {statusLabel[r.status]}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {renderPagination(currentPage, totalPages, setPage, groups.length)}
+      </>
+    );
+  };
 
   return (
     <div className="space-y-8 pb-20 px-1 sm:px-4 max-w-[1400px] mx-auto relative">
@@ -796,7 +954,7 @@ const AdminPage = () => {
             </div>
 
             <div className="space-y-3">
-              {groupedItems.map((g) => {
+              {pagedGroupedItems.map((g) => {
                 const totalColor = getStockColorClass(
                   g.total_stock,
                   g.alert_threshold,
@@ -851,7 +1009,7 @@ const AdminPage = () => {
                                 {cat}
                               </span>
                             ))}
-                            <span className="font-bold text-sm uppercase tracking-tight ml-1">
+                            <span className="font-bold text-sm tracking-tight ml-1">
                               {g.item_name}
                             </span>
                           </div>
@@ -1007,6 +1165,12 @@ const AdminPage = () => {
                 );
               })}
             </div>
+            {renderPagination(
+              itemPage,
+              itemTotalPages,
+              setItemPage,
+              groupedItems.length,
+            )}
           </div>
         )}
       </section>
@@ -1046,7 +1210,13 @@ const AdminPage = () => {
                 <ChevronRight className="h-5 w-5 opacity-40" />
               )}
             </button>
-            {isPendingOpen && renderRequestTable(pendingGroups)}
+            {isPendingOpen &&
+              renderRequestTable(
+                pagedPendingGroups,
+                pendingPage,
+                pendingTotalPages,
+                setPendingPage,
+              )}
           </div>
           <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-md">
             <button
@@ -1065,7 +1235,13 @@ const AdminPage = () => {
                 <ChevronRight className="h-5 w-5 opacity-40" />
               )}
             </button>
-            {isProcessedOpen && renderRequestTable(processedGroups)}
+            {isProcessedOpen &&
+              renderRequestTable(
+                pagedProcessedGroups,
+                processedPage,
+                processedTotalPages,
+                setProcessedPage,
+              )}
           </div>
         </div>
       </section>
@@ -1128,6 +1304,7 @@ const AdminPage = () => {
           setFormOpen(false);
         }}
         item={editingItem}
+        items={items}
       />
 
       <DeleteConfirmDialog
